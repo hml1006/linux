@@ -190,8 +190,9 @@ M:	Johannes Berg <johannes@sipsolutions.net>
 L:	linux-wireless@vger.kernel.org
 S:	Maintained
 W:	https://wireless.wiki.kernel.org/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211.git
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211-next.git
+Q:	https://patchwork.kernel.org/project/linux-wireless/list/
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless-next.git
 F:	Documentation/driver-api/80211/cfg80211.rst
 F:	Documentation/networking/regulatory.rst
 F:	include/linux/ieee80211.h
@@ -4156,9 +4157,8 @@ N:	csky
 K:	csky
 
 CA8210 IEEE-802.15.4 RADIO DRIVER
-M:	Harry Morris <h.morris@cascoda.com>
 L:	linux-wpan@vger.kernel.org
-S:	Maintained
+S:	Orphan
 W:	https://github.com/Cascoda/ca8210-linux.git
 F:	Documentation/devicetree/bindings/net/ieee802154/ca8210.txt
 F:	drivers/net/ieee802154/ca8210.c
@@ -7208,8 +7208,10 @@ F:	drivers/net/mdio/of_mdio.c
 F:	drivers/net/pcs/
 F:	drivers/net/phy/
 F:	include/dt-bindings/net/qca-ar803x.h
+F:	include/linux/linkmode.h
 F:	include/linux/*mdio*.h
 F:	include/linux/mdio/*.h
+F:	include/linux/mii.h
 F:	include/linux/of_net.h
 F:	include/linux/phy.h
 F:	include/linux/phy_fixed.h
@@ -10877,6 +10879,12 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/axboe/linux-block.git
 F:	drivers/ata/pata_arasan_cf.c
 F:	include/linux/pata_arasan_cf_data.h
 
+LIBATA PATA DRIVERS
+R:	Sergey Shtylyov <s.shtylyov@omp.ru>
+L:	linux-ide@vger.kernel.org
+F:	drivers/ata/ata_*.c
+F:	drivers/ata/pata_*.c
+
 LIBATA PATA FARADAY FTIDE010 AND GEMINI SATA BRIDGE DRIVERS
 M:	Linus Walleij <linus.walleij@linaro.org>
 L:	linux-ide@vger.kernel.org
@@ -11366,8 +11374,9 @@ M:	Johannes Berg <johannes@sipsolutions.net>
 L:	linux-wireless@vger.kernel.org
 S:	Maintained
 W:	https://wireless.wiki.kernel.org/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211.git
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211-next.git
+Q:	https://patchwork.kernel.org/project/linux-wireless/list/
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless-next.git
 F:	Documentation/networking/mac80211-injection.rst
 F:	Documentation/networking/mac80211_hwsim/mac80211_hwsim.rst
 F:	drivers/net/wireless/mac80211_hwsim.[ch]
@@ -12396,7 +12405,7 @@ F:	include/uapi/linux/membarrier.h
 F:	kernel/sched/membarrier.c
 
 MEMBLOCK
-M:	Mike Rapoport <rppt@linux.ibm.com>
+M:	Mike Rapoport <rppt@kernel.org>
 L:	linux-mm@kvack.org
 S:	Maintained
 F:	Documentation/core-api/boot-time-mm.rst
@@ -13374,9 +13383,10 @@ NETWORKING DRIVERS (WIRELESS)
 M:	Kalle Valo <kvalo@kernel.org>
 L:	linux-wireless@vger.kernel.org
 S:	Maintained
-Q:	http://patchwork.kernel.org/project/linux-wireless/list/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kvalo/wireless-drivers.git
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kvalo/wireless-drivers-next.git
+W:	https://wireless.wiki.kernel.org/
+Q:	https://patchwork.kernel.org/project/linux-wireless/list/
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless-next.git
 F:	Documentation/devicetree/bindings/net/wireless/
 F:	drivers/net/wireless/
 
@@ -13449,7 +13459,11 @@ L:	netdev@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git
 F:	arch/x86/net/*
+F:	include/linux/ip.h
+F:	include/linux/ipv6*
+F:	include/net/fib*
 F:	include/net/ip*
+F:	include/net/route.h
 F:	net/ipv4/
 F:	net/ipv6/
 
@@ -13510,10 +13524,6 @@ F:	include/net/tls.h
 F:	include/uapi/linux/tls.h
 F:	net/tls/*
 
-NETWORKING [WIRELESS]
-L:	linux-wireless@vger.kernel.org
-Q:	http://patchwork.kernel.org/project/linux-wireless/list/
-
 NETXEN (1/10) GbE SUPPORT
 M:	Manish Chopra <manishc@marvell.com>
 M:	Rahul Verma <rahulv@marvell.com>
@@ -13561,7 +13571,7 @@ F:	tools/testing/selftests/nci/
 
 NFS, SUNRPC, AND LOCKD CLIENTS
 M:	Trond Myklebust <trond.myklebust@hammerspace.com>
-M:	Anna Schumaker <anna.schumaker@netapp.com>
+M:	Anna Schumaker <anna@kernel.org>
 L:	linux-nfs@vger.kernel.org
 S:	Maintained
 W:	http://client.linux-nfs.org
@@ -16464,6 +16474,14 @@ F:	Documentation/devicetree/bindings/i2c/renesas,rmobile-iic.yaml
 F:	drivers/i2c/busses/i2c-rcar.c
 F:	drivers/i2c/busses/i2c-sh_mobile.c
 
+RENESAS R-CAR SATA DRIVER
+R:	Sergey Shtylyov <s.shtylyov@omp.ru>
+S:	Supported
+L:	linux-ide@vger.kernel.org
+L:	linux-renesas-soc@vger.kernel.org
+F:	Documentation/devicetree/bindings/ata/renesas,rcar-sata.yaml
+F:	drivers/ata/sata_rcar.c
+
 RENESAS R-CAR THERMAL DRIVERS
 M:	Niklas Söderlund <niklas.soderlund@ragnatech.se>
 L:	linux-renesas-soc@vger.kernel.org
@@ -16532,8 +16550,9 @@ M:	Johannes Berg <johannes@sipsolutions.net>
 L:	linux-wireless@vger.kernel.org
 S:	Maintained
 W:	https://wireless.wiki.kernel.org/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211.git
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jberg/mac80211-next.git
+Q:	https://patchwork.kernel.org/project/linux-wireless/list/
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wireless/wireless-next.git
 F:	Documentation/ABI/stable/sysfs-class-rfkill
 F:	Documentation/driver-api/rfkill.rst
 F:	include/linux/rfkill.h
