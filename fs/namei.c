@@ -132,10 +132,12 @@ getname_flags(const char __user *filename, int flags, int *empty)
 	char *kname;
 	int len;
 
+	// 如果进程被审计，从审计文件列表查找filename返回
 	result = audit_reusename(filename);
 	if (result)
 		return result;
 
+	// 为filename结构分配内存
 	result = __getname();
 	if (unlikely(!result))
 		return ERR_PTR(-ENOMEM);
@@ -3636,6 +3638,7 @@ static struct file *path_openat(struct nameidata *nd,
 	struct file *file;
 	int error;
 
+	// 分配file结构体
 	file = alloc_empty_file(op->open_flag, current_cred());
 	if (IS_ERR(file))
 		return file;
@@ -3643,14 +3646,15 @@ static struct file *path_openat(struct nameidata *nd,
 	if (unlikely(file->f_flags & __O_TMPFILE)) {
 		error = do_tmpfile(nd, flags, op, file);
 	} else if (unlikely(file->f_flags & O_PATH)) {
-		error = do_o_path(nd, flags, file);
+		error = do_o_path(nd, flags, file); // 分配文件描述符但不打开文件
 	} else {
+		// 路径查找
 		const char *s = path_init(nd, flags);
 		while (!(error = link_path_walk(s, nd)) &&
 		       (s = open_last_lookups(nd, file, op)) != NULL)
 			;
 		if (!error)
-			error = do_open(nd, file, op);
+			error = do_open(nd, file, op); // 打开文件
 		terminate_walk(nd);
 	}
 	if (likely(!error)) {
@@ -3676,6 +3680,7 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	int flags = op->lookup_flags;
 	struct file *filp;
 
+	// 设置进程文件查找结构,保存旧的
 	set_nameidata(&nd, dfd, pathname, NULL);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
