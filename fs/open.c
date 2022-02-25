@@ -1278,6 +1278,7 @@ static long do_sys_openat2(int dfd, const char __user *filename,
 	// 申请一个空闲描述符
 	fd = get_unused_fd_flags(how->flags);
 	if (fd >= 0) {
+		// 打开文件
 		struct file *f = do_filp_open(dfd, tmp, &op);
 		// 打开文件失败回收描述符
 		if (IS_ERR(f)) {

@@ -3088,6 +3088,7 @@ static int nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	unsigned long quirks = id->driver_data;
 	size_t alloc_size;
 
+	// 设置内存node，非numa架构，只有一个node
 	node = dev_to_node(&pdev->dev);
 	if (node == NUMA_NO_NODE)
 		set_dev_node(&pdev->dev, first_memory_node);

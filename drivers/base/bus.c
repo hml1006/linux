@@ -593,6 +593,7 @@ int bus_add_driver(struct device_driver *drv)
 	struct driver_private *priv;
 	int error = 0;
 
+	// 增加bus_type引用计数
 	bus = bus_get(drv->bus);
 	if (!bus)
 		return -EINVAL;
@@ -619,13 +620,16 @@ int bus_add_driver(struct device_driver *drv)
 		if (error)
 			goto out_del_list;
 	}
+	// /sys/module/{module_name}/drivers/{bus_name}:{driver_name}
 	module_add_driver(drv->owner, drv);
 
+	// 创建 sysfs 文件
 	error = driver_create_file(drv, &driver_attr_uevent);
 	if (error) {
 		printk(KERN_ERR "%s: uevent attr (%s) failed\n",
 			__func__, drv->name);
 	}
+	// sysfs 中创建驱动属性文件
 	error = driver_add_groups(drv, bus->drv_groups);
 	if (error) {
 		/* How the hell do we get out of this pickle? Give up */
@@ -633,7 +637,9 @@ int bus_add_driver(struct device_driver *drv)
 			__func__, drv->name);
 	}
 
+	// 驱动和设备bind控制
 	if (!drv->suppress_bind_attrs) {
+		// 创建bind unbind文件
 		error = add_bind_files(drv);
 		if (error) {
 			/* Ditto */
