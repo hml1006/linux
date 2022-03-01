@@ -755,7 +755,7 @@ static irqreturn_t pciehp_ist(int irq, void *dev_id)
 	if (events & DISABLE_SLOT)
 		pciehp_handle_disable_request(ctrl);
 	else if (events & (PCI_EXP_SLTSTA_PDC | PCI_EXP_SLTSTA_DLLSC))
-		pciehp_handle_presence_or_link_change(ctrl, events);
+		pciehp_handle_presence_or_link_change(ctrl, events); // 处理链路状态变化
 	up_read(&ctrl->reset_lock);
 
 	ret = IRQ_HANDLED;

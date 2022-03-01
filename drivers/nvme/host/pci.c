@@ -1814,6 +1814,7 @@ static int nvme_remap_bar(struct nvme_dev *dev, unsigned long size)
 		return -ENOMEM;
 	if (dev->bar)
 		iounmap(dev->bar);
+	// 映射bar0
 	dev->bar = ioremap(pci_resource_start(pdev, 0), size);
 	if (!dev->bar) {
 		dev->bar_mapped_size = 0;
@@ -3017,9 +3018,11 @@ static int nvme_dev_map(struct nvme_dev *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
 
+	// 申请host地址空间，映射bar
 	if (pci_request_mem_regions(pdev, "nvme"))
 		return -ENODEV;
 
+	// bar地址映射到虚拟内存
 	if (nvme_remap_bar(dev, NVME_REG_DBS + 4096))
 		goto release;
 
@@ -3106,8 +3109,11 @@ static int nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto free;
 
 	dev->dev = get_device(&pdev->dev);
+
+	// pdev->dev->driver_data = dev;
 	pci_set_drvdata(pdev, dev);
 
+	// 内存映射
 	result = nvme_dev_map(dev);
 	if (result)
 		goto put_pci;
@@ -3116,10 +3122,12 @@ static int nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_WORK(&dev->remove_work, nvme_remove_dead_ctrl_work);
 	mutex_init(&dev->shutdown_lock);
 
+	// 申请dma内存池
 	result = nvme_setup_prp_pools(dev);
 	if (result)
 		goto unmap;
 
+	// 厂商组合bug
 	quirks |= check_vendor_combination_bug(pdev);
 
 	if (!noacpi && acpi_storage_d3(&pdev->dev)) {
@@ -3148,6 +3156,7 @@ static int nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto release_pools;
 	}
 
+	// 初始化工作队列回调
 	result = nvme_init_ctrl(&dev->ctrl, &pdev->dev, &nvme_pci_ctrl_ops,
 			quirks);
 	if (result)

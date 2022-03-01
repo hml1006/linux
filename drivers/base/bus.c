@@ -483,6 +483,7 @@ void bus_probe_device(struct device *dev)
 	if (!bus)
 		return;
 
+	// 调用probe
 	if (bus->p->drivers_autoprobe)
 		device_initial_probe(dev);
 
