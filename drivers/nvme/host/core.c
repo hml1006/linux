@@ -1191,7 +1191,7 @@ static void nvme_keep_alive_work(struct work_struct *work)
 		dev_dbg(ctrl->device,
 			"reschedule traffic based keep-alive timer\n");
 		ctrl->comp_seen = false;
-		nvme_queue_keep_alive_work(ctrl);
+		nvme_queue_keep_alive_work(ctrl); // nvme keep alive, pcie 不需要
 		return;
 	}
 
@@ -4524,7 +4524,7 @@ static void nvme_fw_act_work(struct work_struct *work)
 
 	nvme_start_queues(ctrl);
 	/* read FW slot information to clear the AER */
-	nvme_get_fw_slot_info(ctrl);
+	nvme_get_fw_slot_info(ctrl); // 有些nvme设备有多个firmware slot
 }
 
 static void nvme_handle_aen_notice(struct nvme_ctrl *ctrl, u32 result)
@@ -4686,12 +4686,12 @@ int nvme_init_ctrl(struct nvme_ctrl *ctrl, struct device *dev,
 	ctrl->quirks = quirks;
 	ctrl->numa_node = NUMA_NO_NODE;
 	INIT_WORK(&ctrl->scan_work, nvme_scan_work); // 扫描namespace
-	INIT_WORK(&ctrl->async_event_work, nvme_async_event_work);
-	INIT_WORK(&ctrl->fw_act_work, nvme_fw_act_work);
+	INIT_WORK(&ctrl->async_event_work, nvme_async_event_work); // async event
+	INIT_WORK(&ctrl->fw_act_work, nvme_fw_act_work); // firmware active
 	INIT_WORK(&ctrl->delete_work, nvme_delete_ctrl_work);
 	init_waitqueue_head(&ctrl->state_wq);
 
-	INIT_DELAYED_WORK(&ctrl->ka_work, nvme_keep_alive_work);
+	INIT_DELAYED_WORK(&ctrl->ka_work, nvme_keep_alive_work); // keep alive
 	INIT_DELAYED_WORK(&ctrl->failfast_work, nvme_failfast_work);
 	memset(&ctrl->ka_cmd, 0, sizeof(ctrl->ka_cmd));
 	ctrl->ka_cmd.common.opcode = nvme_admin_keep_alive;

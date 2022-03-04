@@ -487,6 +487,7 @@ static int nvme_pci_map_queues(struct blk_mq_tag_set *set)
  */
 static inline void nvme_write_sq_db(struct nvme_queue *nvmeq, bool write_sq)
 {
+	// 队列满后写doorbell
 	if (!write_sq) {
 		u16 next_tail = nvmeq->sq_tail + 1;
 
@@ -965,7 +966,9 @@ static blk_status_t nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 	if (unlikely(ret))
 		return ret;
 	spin_lock(&nvmeq->sq_lock);
+	// 拷贝命令到提交队列
 	nvme_sq_copy_cmd(nvmeq, &iod->cmd);
+	// 写submit queue doorbell
 	nvme_write_sq_db(nvmeq, bd->last);
 	spin_unlock(&nvmeq->sq_lock);
 	return BLK_STS_OK;
