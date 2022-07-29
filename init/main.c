@@ -930,13 +930,19 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	// 设置栈溢出magic number
 	set_task_stack_end_magic(&init_task);
+	// 获取smp处理器id
 	smp_setup_processor_id();
+	// 初始化obj_hash、obj_static_pool这2个全局变量，这2个全局变量会在调试的时候用到
 	debug_objects_early_init();
+	// 计算隐藏内核build id
 	init_vmlinux_build_id();
 
+	// 初始化cgroups
 	cgroup_init_early();
 
+	// 禁中断
 	local_irq_disable();
 	early_boot_irqs_disabled = true;
 
@@ -944,24 +950,39 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * Interrupts are still disabled. Do necessary setups, then
 	 * enable them.
 	 */
+	// 设置boot cpu标记
 	boot_cpu_init();
+	// 初始化high memory页表
 	page_address_init();
 	pr_notice("%s", linux_banner);
+	// 安全模块初始化
 	early_security_init();
+	// 根据bootloader传递的参数收集系统硬件信息
 	setup_arch(&command_line);
+	// 获取启动配置
 	setup_boot_config();
+	// 保存命令行参数
 	setup_command_line(command_line);
+	// 设置 nr_cpu_ids 变量
 	setup_nr_cpu_ids();
+	// 给每个CPU分配内存，拷贝.data.percpu段的数据. 为系统中的每个CPU的per_cpu变量申请空间
 	setup_per_cpu_areas();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	// 设置启动过的CPU标识
 	boot_cpu_hotplug_init();
 
+	// 内存管理相关初始化
+	// 建立并初始化node和zone area信息
 	build_all_zonelists(NULL);
+	// cpu热插拔内存回调函数设置
 	page_alloc_init();
 
 	pr_notice("Kernel command line: %s\n", saved_command_line);
 	/* parameters may set static keys */
+	// jump label表初始化,通过替换指定位置nop指令为jump指令实现跳转
+	// 举例 tracepoint,开启后,会把函数中tracepoint位置的nop指令替换为跳转指令,避免tracepoint位置if判断
 	jump_label_init();
+	// 解析参数
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -979,15 +1000,25 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * These use large bootmem allocations and must precede
 	 * kmem_cache_init()
 	 */
+	// 为console申请内存
 	setup_log_buf(0);
+	// 申请dentry cache，inode hash表缓存
 	vfs_caches_init_early();
+	// 排序异常表 https://www.cnblogs.com/chengxuyuancc/p/3428944.html
+	// https://www.qetool.com/scripts/view/19548.html
+	// 异常表保存内核访问用户空间地址指令和fixup地址，发生page fault时，根据异常表判断时内核访问内存越界还是系统
+	// 调用传递的地址错误，例如 copy{to,from}user()
 	sort_main_extable();
+	// 系统保留中断向量初始化
 	trap_init();
+	// 内存管理子系统初始化
 	mm_init();
 
+	// ftrace内核调试
 	ftrace_init();
 
 	/* trace_printk can be enabled here */
+	// tracepoint中的trace_printk，申请ring buffer
 	early_trace_init();
 
 	/*
@@ -1000,12 +1031,15 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
 		local_irq_disable();
+	// 基数数初始化
+	// https://blog.csdn.net/petershina/article/details/53313624
 	radix_tree_init();
 
 	/*
 	 * Set up housekeeping before setting up workqueues to allow the unbound
 	 * workqueue to take non-housekeeping into account.
 	 */
+	// 未绑定cpu的workqueue，timer，kthread等cpu属性管理
 	housekeeping_init();
 
 	/*
@@ -1027,14 +1061,23 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
 	init_IRQ();
+	// 时钟事件设备信息发生变化时通知
 	tick_init();
 	rcu_init_nohz();
 	init_timers();
+	// schedule rcu
 	srcu_init();
+	// 高分辨率定时器初始化
 	hrtimers_init();
 	softirq_init();
+	// 时钟源和计量时间初始化
 	timekeeping_init();
+	/**
+	 * 内存错误检测初始化
+	 * https://tinylab.org/riscv-linux-kfence/
+	 */
 	kfence_init();
+	// TSC时间戳计数器初始化
 	time_init();
 
 	/*
@@ -1055,6 +1098,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
 
+	// slab分配器初始化
 	kmem_cache_init_late();
 
 	/*
@@ -1066,7 +1110,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
-
+	// 死锁检测初始化
 	lockdep_init();
 
 	/*
