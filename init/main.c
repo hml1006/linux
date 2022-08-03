@@ -832,9 +832,12 @@ static void __init mm_init(void)
 	 * bigger than MAX_ORDER unless SPARSEMEM.
 	 */
 	page_ext_init_flatmem();
+	// 内存调试相关static key初始化
 	init_mem_debugging_and_hardening();
+	// 内存溢出检测功能，kfence需要一个池
 	kfence_alloc_pool();
 	report_meminit();
+	// 缓存stacetrace，用于调试工具
 	stack_depot_early_init();
 	mem_init();
 	mem_init_print_info();
@@ -844,6 +847,7 @@ static void __init mm_init(void)
 	 * slab is ready so that stack_depot_init() works properly
 	 */
 	page_ext_init_flatmem_late();
+	// 内存泄露统计功能
 	kmemleak_init();
 	pgtable_init();
 	debug_objects_mem_init();
@@ -932,7 +936,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 
 	// 设置栈溢出magic number
 	set_task_stack_end_magic(&init_task);
-	// 获取smp处理器id
+	// 获取smp处理器id，x86为空
 	smp_setup_processor_id();
 	// 初始化obj_hash、obj_static_pool这2个全局变量，这2个全局变量会在调试的时候用到
 	debug_objects_early_init();
@@ -966,6 +970,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	// 设置 nr_cpu_ids 变量
 	setup_nr_cpu_ids();
 	// 给每个CPU分配内存，拷贝.data.percpu段的数据. 为系统中的每个CPU的per_cpu变量申请空间
+	// per cpu 变量访问方式为gs:ptr, 每个cpu的per cpu变量地址放gs寄存器
 	setup_per_cpu_areas();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 	// 设置启动过的CPU标识
@@ -1031,7 +1036,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
 		local_irq_disable();
-	// 基数数初始化
+	// 基数树初始化
 	// https://blog.csdn.net/petershina/article/details/53313624
 	radix_tree_init();
 
@@ -1138,35 +1143,46 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	}
 #endif
 	setup_per_cpu_pageset();
+	// numa内存分配策略，从哪个node分配内存
 	numa_policy_init();
+	// 高级电源管理初始化
 	acpi_early_init();
 	if (late_time_init)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+	// pid radix tree初始化
 	pid_idr_init();
+	// 匿名虚拟内存初始化
 	anon_vma_init();
 #ifdef CONFIG_X86
 	if (efi_enabled(EFI_RUNTIME_SERVICES))
 		efi_enter_virtual_mode();
 #endif
 	thread_stack_cache_init();
+	// 证书初始化
 	cred_init();
 	fork_init();
 	proc_caches_init();
 	uts_ns_init();
+	// 证书key初始化
 	key_init();
+	// 安全框架初始化
 	security_init();
 	dbg_late_init();
 	net_ns_init();
+	// vfs相关数据结构cache初始化
 	vfs_caches_init();
 	pagecache_init();
 	signals_init();
+	// 顺序读写文件，procfs, sysfs,debugfs用
 	seq_file_init();
 	proc_root_init();
+	// nfs
 	nsfs_init();
 	cpuset_init();
 	cgroup_init();
+	// task状态
 	taskstats_init_early();
 	delayacct_init();
 
@@ -1175,6 +1191,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 
 	acpi_subsystem_init();
 	arch_post_acpi_subsys_init();
+	// 竞争检测
 	kcsan_init();
 
 	/* Do the rest non-__init'ed, we're now alive */

@@ -1329,6 +1329,9 @@ failed:
 
 void __init mem_init(void)
 {
+	/**
+	 * iommu初始化，用于pcie虚拟化
+	 */
 	pci_iommu_alloc();
 
 	/* clear_bss() already clear the empty_zero_page */
