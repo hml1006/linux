@@ -2655,7 +2655,6 @@ int pci_scan_slot(struct pci_bus *bus, int devfn)
 	if (only_one_child(bus) && (devfn > 0))
 		return 0; /* Already scanned the entire slot */
 
-	// 扫描单个设备
 	dev = pci_scan_single_device(bus, devfn);
 	if (!dev)
 		return 0;
