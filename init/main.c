@@ -1195,6 +1195,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	// 竞争检测
 	kcsan_init();
 
+	// 调用initcall函数，pci初始化也是initcall
 	/* Do the rest non-__init'ed, we're now alive */
 	arch_call_rest_init();
 

@@ -1390,6 +1390,9 @@ static int __init acpi_bus_init(void)
 struct kobject *acpi_kobj;
 EXPORT_SYMBOL_GPL(acpi_kobj);
 
+/**
+ * acpi初始化，会扫描pci设备
+ */
 static int __init acpi_init(void)
 {
 	int result;

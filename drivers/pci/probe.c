@@ -102,6 +102,10 @@ static struct class pcibus_class = {
 	.dev_groups	= pcibus_groups,
 };
 
+
+/**
+ * 注册 /sys/class/pci_buss/ 目录
+ */
 static int __init pcibus_class_init(void)
 {
 	return class_register(&pcibus_class);

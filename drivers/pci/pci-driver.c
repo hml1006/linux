@@ -1704,6 +1704,9 @@ struct bus_type pcie_port_bus_type = {
 EXPORT_SYMBOL_GPL(pcie_port_bus_type);
 #endif
 
+/**
+ * 注册pci总线驱动
+ */
 static int __init pci_driver_init(void)
 {
 	int ret;
