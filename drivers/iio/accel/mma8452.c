@@ -1545,9 +1545,9 @@ static const struct of_device_id mma8452_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, mma8452_dt_ids);
 
-static int mma8452_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int mma8452_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct mma8452_data *data;
 	struct iio_dev *indio_dev;
 	int ret;
@@ -1735,7 +1735,7 @@ disable_regulator_vdd:
 	return ret;
 }
 
-static int mma8452_remove(struct i2c_client *client)
+static void mma8452_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct mma8452_data *data = iio_priv(indio_dev);
@@ -1751,8 +1751,6 @@ static int mma8452_remove(struct i2c_client *client)
 
 	regulator_disable(data->vddio_reg);
 	regulator_disable(data->vdd_reg);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -1848,7 +1846,7 @@ static struct i2c_driver mma8452_driver = {
 		.of_match_table = mma8452_dt_ids,
 		.pm	= &mma8452_pm_ops,
 	},
-	.probe = mma8452_probe,
+	.probe_new = mma8452_probe,
 	.remove = mma8452_remove,
 	.id_table = mma8452_id,
 };

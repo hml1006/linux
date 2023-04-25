@@ -41,7 +41,8 @@
 #define RTW_EX_CH_INFO_HDR_SIZE		2
 #define RTW_SCAN_WIDTH			0
 #define RTW_PRI_CH_IDX			1
-#define RTW_PROBE_PG_CNT		2
+#define RTW_OLD_PROBE_PG_CNT		2
+#define RTW_PROBE_PG_CNT		4
 
 enum rtw_c2h_cmd_id {
 	C2H_CCX_TX_RPT = 0x03,
@@ -78,6 +79,11 @@ struct rtw_c2h_adaptivity {
 	u8 l2h;
 	u8 h2l;
 	u8 option;
+} __packed;
+
+struct rtw_h2c_cmd {
+	__le32 msg;
+	__le32 msg_ext;
 } __packed;
 
 enum rtw_rsvd_packet_type {
@@ -118,6 +124,10 @@ enum rtw_fw_feature {
 	FW_FEATURE_ADAPTIVITY = BIT(7),
 	FW_FEATURE_SCAN_OFFLOAD = BIT(8),
 	FW_FEATURE_MAX = BIT(31),
+};
+
+enum rtw_fw_feature_ext {
+	FW_FEATURE_EXT_OLD_PAGE_NUM = BIT(0),
 };
 
 enum rtw_beacon_filter_offload_mode {
@@ -322,6 +332,11 @@ struct rtw_fw_hdr_legacy {
 	__le32 rsvd4;	/* 0x18 */
 	__le32 rsvd5;
 } __packed;
+
+#define RTW_FW_VER_CODE(ver, sub_ver, idx)	\
+	(((ver) << 16) | ((sub_ver) << 8) | (idx))
+#define RTW_FW_SUIT_VER_CODE(s)	\
+	RTW_FW_VER_CODE((s).version, (s).sub_version, (s).sub_index)
 
 /* C2H */
 #define GET_CCX_REPORT_SEQNUM_V0(c2h_payload)	(c2h_payload[6] & 0xfc)
@@ -540,6 +555,8 @@ static inline void rtw_h2c_pkt_set_header(u8 *h2c_pkt, u8 sub_id)
 #define H2C_CMD_AOAC_GLOBAL_INFO	0x82
 #define H2C_CMD_NLO_INFO		0x8C
 
+#define H2C_CMD_RECOVER_BT_DEV		0xD1
+
 #define SET_H2C_CMD_ID_CLASS(h2c_pkt, value)				       \
 	le32p_replace_bits((__le32 *)(h2c_pkt) + 0x00, value, GENMASK(7, 0))
 
@@ -739,6 +756,9 @@ static inline void rtw_h2c_pkt_set_header(u8 *h2c_pkt, u8 sub_id)
 #define SET_NLO_LOC_NLO_INFO(h2c_pkt, value)                                   \
 	le32p_replace_bits((__le32 *)(h2c_pkt) + 0x00, value, GENMASK(23, 16))
 
+#define SET_RECOVER_BT_DEV_EN(h2c_pkt, value)				       \
+	le32p_replace_bits((__le32 *)(h2c_pkt) + 0x00, value, BIT(8))
+
 #define GET_FW_DUMP_LEN(_header)					\
 	le32_get_bits(*((__le32 *)(_header) + 0x00), GENMASK(15, 0))
 #define GET_FW_DUMP_SEQ(_header)					\
@@ -768,6 +788,12 @@ static inline bool rtw_fw_feature_check(struct rtw_fw_state *fw,
 					enum rtw_fw_feature feature)
 {
 	return !!(fw->feature & feature);
+}
+
+static inline bool rtw_fw_feature_ext_check(struct rtw_fw_state *fw,
+					    enum rtw_fw_feature_ext feature)
+{
+	return !!(fw->feature_ext & feature);
 }
 
 void rtw_fw_c2h_cmd_rx_irqsafe(struct rtw_dev *rtwdev, u32 pkt_offset,
@@ -822,6 +848,7 @@ void rtw_fw_set_aoac_global_info_cmd(struct rtw_dev *rtwdev,
 				     u8 group_key_enc);
 
 void rtw_fw_set_nlo_info(struct rtw_dev *rtwdev, bool enable);
+void rtw_fw_set_recover_bt_device(struct rtw_dev *rtwdev);
 void rtw_fw_update_pkt_probe_req(struct rtw_dev *rtwdev,
 				 struct cfg80211_ssid *ssid);
 void rtw_fw_channel_switch(struct rtw_dev *rtwdev, bool enable);
@@ -831,7 +858,8 @@ int rtw_fw_dump_fifo(struct rtw_dev *rtwdev, u8 fifo_sel, u32 addr, u32 size,
 		     u32 *buffer);
 void rtw_fw_scan_notify(struct rtw_dev *rtwdev, bool start);
 void rtw_fw_adaptivity(struct rtw_dev *rtwdev);
-void rtw_store_op_chan(struct rtw_dev *rtwdev);
+void rtw_store_op_chan(struct rtw_dev *rtwdev, bool backup);
+void rtw_clear_op_chan(struct rtw_dev *rtwdev);
 void rtw_hw_scan_start(struct rtw_dev *rtwdev, struct ieee80211_vif *vif,
 		       struct ieee80211_scan_request *req);
 void rtw_hw_scan_complete(struct rtw_dev *rtwdev, struct ieee80211_vif *vif,

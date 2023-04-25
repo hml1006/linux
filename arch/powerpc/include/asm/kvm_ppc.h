@@ -104,7 +104,6 @@ extern void kvmppc_subarch_vcpu_uninit(struct kvm_vcpu *vcpu);
 
 extern void kvmppc_mmu_map(struct kvm_vcpu *vcpu, u64 gvaddr, gpa_t gpaddr,
                            unsigned int gtlb_idx);
-extern void kvmppc_mmu_priv_switch(struct kvm_vcpu *vcpu, int usermode);
 extern void kvmppc_mmu_switch_pid(struct kvm_vcpu *vcpu, u32 pid);
 extern int kvmppc_mmu_dtlb_index(struct kvm_vcpu *vcpu, gva_t eaddr);
 extern int kvmppc_mmu_itlb_index(struct kvm_vcpu *vcpu, gva_t eaddr);
@@ -119,7 +118,6 @@ extern int kvmppc_xlate(struct kvm_vcpu *vcpu, ulong eaddr,
 extern int kvmppc_core_vcpu_create(struct kvm_vcpu *vcpu);
 extern void kvmppc_core_vcpu_free(struct kvm_vcpu *vcpu);
 extern int kvmppc_core_vcpu_setup(struct kvm_vcpu *vcpu);
-extern int kvmppc_core_check_processor_compat(void);
 extern int kvmppc_core_vcpu_translate(struct kvm_vcpu *vcpu,
                                       struct kvm_translation *tr);
 
@@ -153,7 +151,6 @@ extern int kvmppc_core_check_requests(struct kvm_vcpu *vcpu);
 extern int kvmppc_booke_init(void);
 extern void kvmppc_booke_exit(void);
 
-extern void kvmppc_core_destroy_mmu(struct kvm_vcpu *vcpu);
 extern int kvmppc_kvm_pv(struct kvm_vcpu *vcpu);
 extern void kvmppc_map_magic(struct kvm_vcpu *vcpu);
 
@@ -162,8 +159,6 @@ extern void kvmppc_set_hpt(struct kvm *kvm, struct kvm_hpt_info *info);
 extern long kvmppc_alloc_reset_hpt(struct kvm *kvm, int order);
 extern void kvmppc_free_hpt(struct kvm_hpt_info *info);
 extern void kvmppc_rmap_reset(struct kvm *kvm);
-extern long kvmppc_prepare_vrma(struct kvm *kvm,
-				struct kvm_userspace_memory_region *mem);
 extern void kvmppc_map_vrma(struct kvm_vcpu *vcpu,
 			struct kvm_memory_slot *memslot, unsigned long porder);
 extern int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu);
@@ -1017,6 +1012,18 @@ static inline void kvmppc_fix_ee_before_entry(void)
 	irq_soft_mask_set(IRQS_ENABLED);
 #endif
 }
+
+static inline void kvmppc_fix_ee_after_exit(void)
+{
+#ifdef CONFIG_PPC64
+	/* Only need to enable IRQs by hard enabling them after this */
+	local_paca->irq_happened = PACA_IRQ_HARD_DIS;
+	irq_soft_mask_set(IRQS_ALL_DISABLED);
+#endif
+
+	trace_hardirqs_off();
+}
+
 
 static inline ulong kvmppc_get_ea_indexed(struct kvm_vcpu *vcpu, int ra, int rb)
 {

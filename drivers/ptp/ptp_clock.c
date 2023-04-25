@@ -131,10 +131,7 @@ static int ptp_clock_adjtime(struct posix_clock *pc, struct __kernel_timex *tx)
 		long ppb = scaled_ppm_to_ppb(tx->freq);
 		if (ppb > ops->max_adj || ppb < -ops->max_adj)
 			return -ERANGE;
-		if (ops->adjfine)
-			err = ops->adjfine(ops, tx->freq);
-		else
-			err = ops->adjfreq(ops, ppb);
+		err = ops->adjfine(ops, tx->freq);
 		ptp->dialed_frequency = tx->freq;
 	} else if (tx->modes & ADJ_OFFSET) {
 		if (ops->adjphase) {
@@ -174,7 +171,7 @@ static void ptp_clock_release(struct device *dev)
 	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
 	mutex_destroy(&ptp->n_vclocks_mux);
-	ida_simple_remove(&ptp_clocks_map, ptp->index);
+	ida_free(&ptp_clocks_map, ptp->index);
 	kfree(ptp);
 }
 
@@ -217,7 +214,7 @@ struct ptp_clock *ptp_clock_register(struct ptp_clock_info *info,
 	if (ptp == NULL)
 		goto no_memory;
 
-	index = ida_simple_get(&ptp_clocks_map, 0, MINORMASK + 1, GFP_KERNEL);
+	index = ida_alloc_max(&ptp_clocks_map, MINORMASK, GFP_KERNEL);
 	if (index < 0) {
 		err = index;
 		goto no_slot;
@@ -332,7 +329,7 @@ kworker_err:
 	mutex_destroy(&ptp->tsevq_mux);
 	mutex_destroy(&ptp->pincfg_mux);
 	mutex_destroy(&ptp->n_vclocks_mux);
-	ida_simple_remove(&ptp_clocks_map, index);
+	ida_free(&ptp_clocks_map, index);
 no_slot:
 	kfree(ptp);
 no_memory:

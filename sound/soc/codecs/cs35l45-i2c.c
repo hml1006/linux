@@ -36,13 +36,11 @@ static int cs35l45_i2c_probe(struct i2c_client *client)
 	return cs35l45_probe(cs35l45);
 }
 
-static int cs35l45_i2c_remove(struct i2c_client *client)
+static void cs35l45_i2c_remove(struct i2c_client *client)
 {
 	struct cs35l45_private *cs35l45 = i2c_get_clientdata(client);
 
 	cs35l45_remove(cs35l45);
-
-	return 0;
 }
 
 static const struct of_device_id cs35l45_of_match[] = {
@@ -73,4 +71,3 @@ MODULE_DESCRIPTION("I2C CS35L45 driver");
 MODULE_AUTHOR("James Schulman, Cirrus Logic Inc, <james.schulman@cirrus.com>");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(SND_SOC_CS35L45);
-MODULE_IMPORT_NS(SND_SOC_CS35L45_TABLES);

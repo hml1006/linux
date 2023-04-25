@@ -114,7 +114,7 @@
 	 * them if required.
 	 */
 	.macro	apply_ssbd, state, tmp1, tmp2
-alternative_cb	spectre_v4_patch_fw_mitigation_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, spectre_v4_patch_fw_mitigation_enable
 	b	.L__asm_ssbd_skip\@		// Patched to NOP
 alternative_cb_end
 	ldr_this_cpu	\tmp2, arm64_ssbd_callback_required, \tmp1
@@ -123,7 +123,7 @@ alternative_cb_end
 	tbnz	\tmp2, #TIF_SSBD, .L__asm_ssbd_skip\@
 	mov	w0, #ARM_SMCCC_ARCH_WORKAROUND_2
 	mov	w1, #\state
-alternative_cb	smccc_patch_fw_mitigation_conduit
+alternative_cb	ARM64_ALWAYS_SYSTEM, smccc_patch_fw_mitigation_conduit
 	nop					// Patched to SMC/HVC #0
 alternative_cb_end
 .L__asm_ssbd_skip\@:
@@ -175,7 +175,7 @@ alternative_else_nop_endif
 
 	.macro mte_set_kernel_gcr, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
-alternative_cb	kasan_hw_tags_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, kasan_hw_tags_enable
 	b	1f
 alternative_cb_end
 	mov	\tmp, KERNEL_GCR_EL1
@@ -186,7 +186,7 @@ alternative_cb_end
 
 	.macro mte_set_user_gcr, tsk, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
-alternative_cb	kasan_hw_tags_enable
+alternative_cb	ARM64_ALWAYS_SYSTEM, kasan_hw_tags_enable
 	b	1f
 alternative_cb_end
 	ldr	\tmp, [\tsk, #THREAD_MTE_CTRL]
@@ -197,6 +197,9 @@ alternative_cb_end
 	.endm
 
 	.macro	kernel_entry, el, regsize = 64
+	.if	\el == 0
+	alternative_insn nop, SET_PSTATE_DIT(1), ARM64_HAS_DIT
+	.endif
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
 	.endif
@@ -272,7 +275,7 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 alternative_else_nop_endif
 1:
 
-	scs_load tsk
+	scs_load_current
 	.else
 	add	x21, sp, #PT_REGS_SIZE
 	get_current_task tsk
@@ -308,13 +311,16 @@ alternative_else_nop_endif
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
-	/* Save pmr */
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+alternative_if_not ARM64_HAS_GIC_PRIO_MASKING
+	b	.Lskip_pmr_save\@
+alternative_else_nop_endif
+
 	mrs_s	x20, SYS_ICC_PMR_EL1
 	str	x20, [sp, #S_PMR_SAVE]
 	mov	x20, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, x20
-alternative_else_nop_endif
+
+.Lskip_pmr_save\@:
 #endif
 
 	/*
@@ -333,15 +339,19 @@ alternative_else_nop_endif
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
-	/* Restore pmr */
-alternative_if ARM64_HAS_IRQ_PRIO_MASKING
+alternative_if_not ARM64_HAS_GIC_PRIO_MASKING
+	b	.Lskip_pmr_restore\@
+alternative_else_nop_endif
+
 	ldr	x20, [sp, #S_PMR_SAVE]
 	msr_s	SYS_ICC_PMR_EL1, x20
-	mrs_s	x21, SYS_ICC_CTLR_EL1
-	tbz	x21, #6, .L__skip_pmr_sync\@	// Check for ICC_CTLR_EL1.PMHE
-	dsb	sy				// Ensure priority change is seen by redistributor
-.L__skip_pmr_sync\@:
+
+	/* Ensure priority change is seen by redistributor */
+alternative_if_not ARM64_HAS_GIC_PRIO_RELAXED_SYNC
+	dsb	sy
 alternative_else_nop_endif
+
+.Lskip_pmr_restore\@:
 #endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
@@ -845,7 +855,7 @@ SYM_FUNC_START(cpu_switch_to)
 	msr	sp_el0, x1
 	ptrauth_keys_install_kernel x1, x8, x9, x10
 	scs_save x0
-	scs_load x1
+	scs_load_current
 	ret
 SYM_FUNC_END(cpu_switch_to)
 NOKPROBE(cpu_switch_to)
@@ -873,19 +883,19 @@ NOKPROBE(ret_from_fork)
  */
 SYM_FUNC_START(call_on_irq_stack)
 #ifdef CONFIG_SHADOW_CALL_STACK
-	stp	scs_sp, xzr, [sp, #-16]!
+	get_current_task x16
+	scs_save x16
 	ldr_this_cpu scs_sp, irq_shadow_call_stack_ptr, x17
 #endif
+
 	/* Create a frame record to save our LR and SP (implicit in FP) */
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
 
 	ldr_this_cpu x16, irq_stack_ptr, x17
-	mov	x15, #IRQ_STACK_SIZE
-	add	x16, x16, x15
 
 	/* Move to the new stack and call the function there */
-	mov	sp, x16
+	add	sp, x16, #IRQ_STACK_SIZE
 	blr	x1
 
 	/*
@@ -894,9 +904,7 @@ SYM_FUNC_START(call_on_irq_stack)
 	 */
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
-#ifdef CONFIG_SHADOW_CALL_STACK
-	ldp	scs_sp, xzr, [sp], #16
-#endif
+	scs_load_current
 	ret
 SYM_FUNC_END(call_on_irq_stack)
 NOKPROBE(call_on_irq_stack)

@@ -53,6 +53,7 @@ struct io_mapped_ubuf {
 	struct bio_vec	bvec[];
 };
 
+void io_rsrc_put_tw(struct callback_head *cb);
 void io_rsrc_put_work(struct work_struct *work);
 void io_rsrc_refs_refill(struct io_ring_ctx *ctx);
 void io_wait_rsrc_data(struct io_rsrc_data *data);
@@ -82,11 +83,7 @@ int __io_scm_file_account(struct io_ring_ctx *ctx, struct file *file);
 #if defined(CONFIG_UNIX)
 static inline bool io_file_need_scm(struct file *filp)
 {
-#if defined(IO_URING_SCM_ALL)
-	return true;
-#else
 	return !!unix_get_socket(filp);
-#endif
 }
 #else
 static inline bool io_file_need_scm(struct file *filp)
@@ -147,15 +144,13 @@ static inline void io_req_set_rsrc_node(struct io_kiocb *req,
 					unsigned int issue_flags)
 {
 	if (!req->rsrc_node) {
+		io_ring_submit_lock(ctx, issue_flags);
+
+		lockdep_assert_held(&ctx->uring_lock);
+
 		req->rsrc_node = ctx->rsrc_node;
-
-		if (!(issue_flags & IO_URING_F_UNLOCKED)) {
-			lockdep_assert_held(&ctx->uring_lock);
-
-			io_charge_rsrc_node(ctx);
-		} else {
-			percpu_ref_get(&req->rsrc_node->refs);
-		}
+		io_charge_rsrc_node(ctx);
+		io_ring_submit_unlock(ctx, issue_flags);
 	}
 }
 

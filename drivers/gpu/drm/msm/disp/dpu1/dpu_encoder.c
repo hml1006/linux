@@ -162,7 +162,8 @@ enum dpu_enc_rc_states {
  * @vsync_event_work:		worker to handle vsync event for autorefresh
  * @topology:                   topology of the display
  * @idle_timeout:		idle timeout duration in milliseconds
- * @dsc:			msm_display_dsc_config pointer, for DSC-enabled encoders
+ * @wide_bus_en:		wide bus is enabled on this interface
+ * @dsc:			drm_dsc_config pointer, for DSC-enabled encoders
  */
 struct dpu_encoder_virt {
 	struct drm_encoder base;
@@ -208,7 +209,7 @@ struct dpu_encoder_virt {
 	bool wide_bus_en;
 
 	/* DSC configuration */
-	struct msm_display_dsc_config *dsc;
+	struct drm_dsc_config *dsc;
 };
 
 #define to_dpu_encoder_virt(x) container_of(x, struct dpu_encoder_virt, base)
@@ -340,9 +341,7 @@ void dpu_encoder_helper_report_irq_timeout(struct dpu_encoder_phys *phys_enc,
 			phys_enc->intf_idx - INTF_0, phys_enc->wb_idx - WB_0,
 			phys_enc->hw_pp->idx - PINGPONG_0, intr_idx);
 
-	if (phys_enc->parent_ops->handle_frame_done)
-		phys_enc->parent_ops->handle_frame_done(
-				phys_enc->parent, phys_enc,
+	dpu_encoder_frame_done_callback(phys_enc->parent, phys_enc,
 				DPU_ENCODER_FRAME_EVENT_ERROR);
 }
 
@@ -579,19 +578,18 @@ static struct msm_display_topology dpu_encoder_get_topology(
 			topology.num_dspp = topology.num_lm;
 	}
 
-	topology.num_enc = 0;
 	topology.num_intf = intf_count;
 
 	if (dpu_enc->dsc) {
-		/* In case of Display Stream Compression (DSC), we would use
-		 * 2 encoders, 2 layer mixers and 1 interface
+		/*
+		 * In case of Display Stream Compression (DSC), we would use
+		 * 2 DSC encoders, 2 layer mixers and 1 interface
 		 * this is power optimal and can drive up to (including) 4k
 		 * screens
 		 */
-		topology.num_enc = 2;
 		topology.num_dsc = 2;
-		topology.num_intf = 1;
 		topology.num_lm = 2;
+		topology.num_intf = 1;
 	}
 
 	return topology;
@@ -1284,7 +1282,7 @@ static enum dpu_wb dpu_encoder_get_wb(const struct dpu_mdss_cfg *catalog,
 	return WB_MAX;
 }
 
-static void dpu_encoder_vblank_callback(struct drm_encoder *drm_enc,
+void dpu_encoder_vblank_callback(struct drm_encoder *drm_enc,
 		struct dpu_encoder_phys *phy_enc)
 {
 	struct dpu_encoder_virt *dpu_enc = NULL;
@@ -1306,7 +1304,7 @@ static void dpu_encoder_vblank_callback(struct drm_encoder *drm_enc,
 	DPU_ATRACE_END("encoder_vblank_callback");
 }
 
-static void dpu_encoder_underrun_callback(struct drm_encoder *drm_enc,
+void dpu_encoder_underrun_callback(struct drm_encoder *drm_enc,
 		struct dpu_encoder_phys *phy_enc)
 {
 	if (!phy_enc)
@@ -1382,7 +1380,7 @@ void dpu_encoder_register_frame_event_callback(struct drm_encoder *drm_enc,
 	spin_unlock_irqrestore(&dpu_enc->enc_spinlock, lock_flags);
 }
 
-static void dpu_encoder_frame_done_callback(
+void dpu_encoder_frame_done_callback(
 		struct drm_encoder *drm_enc,
 		struct dpu_encoder_phys *ready_phys, u32 event)
 {
@@ -1791,12 +1789,12 @@ static void dpu_encoder_vsync_event_work_handler(struct kthread_work *work)
 }
 
 static u32
-dpu_encoder_dsc_initial_line_calc(struct msm_display_dsc_config *dsc,
+dpu_encoder_dsc_initial_line_calc(struct drm_dsc_config *dsc,
 				  u32 enc_ip_width)
 {
 	int ssm_delay, total_pixels, soft_slice_per_enc;
 
-	soft_slice_per_enc = enc_ip_width / dsc->drm->slice_width;
+	soft_slice_per_enc = enc_ip_width / dsc->slice_width;
 
 	/*
 	 * minimum number of initial line pixels is a sum of:
@@ -1808,16 +1806,16 @@ dpu_encoder_dsc_initial_line_calc(struct msm_display_dsc_config *dsc,
 	 * 5. 6 additional pixels as the output of the rate buffer is
 	 *    48 bits wide
 	 */
-	ssm_delay = ((dsc->drm->bits_per_component < 10) ? 84 : 92);
-	total_pixels = ssm_delay * 3 + dsc->drm->initial_xmit_delay + 47;
+	ssm_delay = ((dsc->bits_per_component < 10) ? 84 : 92);
+	total_pixels = ssm_delay * 3 + dsc->initial_xmit_delay + 47;
 	if (soft_slice_per_enc > 1)
 		total_pixels += (ssm_delay * 3);
-	return DIV_ROUND_UP(total_pixels, dsc->drm->slice_width);
+	return DIV_ROUND_UP(total_pixels, dsc->slice_width);
 }
 
 static void dpu_encoder_dsc_pipe_cfg(struct dpu_hw_dsc *hw_dsc,
 				     struct dpu_hw_pingpong *hw_pp,
-				     struct msm_display_dsc_config *dsc,
+				     struct drm_dsc_config *dsc,
 				     u32 common_mode,
 				     u32 initial_lines)
 {
@@ -1830,12 +1828,15 @@ static void dpu_encoder_dsc_pipe_cfg(struct dpu_hw_dsc *hw_dsc,
 	if (hw_pp->ops.setup_dsc)
 		hw_pp->ops.setup_dsc(hw_pp);
 
+	if (hw_dsc->ops.dsc_bind_pingpong_blk)
+		hw_dsc->ops.dsc_bind_pingpong_blk(hw_dsc, true, hw_pp->idx);
+
 	if (hw_pp->ops.enable_dsc)
 		hw_pp->ops.enable_dsc(hw_pp);
 }
 
 static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
-				 struct msm_display_dsc_config *dsc)
+				 struct drm_dsc_config *dsc)
 {
 	/* coding only for 2LM, 2enc, 1 dsc config */
 	struct dpu_encoder_phys *enc_master = dpu_enc->cur_master;
@@ -1858,14 +1859,15 @@ static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
 		}
 	}
 
-	pic_width = dsc->drm->pic_width;
+	dsc_common_mode = 0;
+	pic_width = dsc->pic_width;
 
 	dsc_common_mode = DSC_MODE_MULTIPLEX | DSC_MODE_SPLIT_PANEL;
 	if (enc_master->intf_mode == INTF_MODE_VIDEO)
 		dsc_common_mode |= DSC_MODE_VIDEO;
 
-	this_frame_slices = pic_width / dsc->drm->slice_width;
-	intf_ip_w = this_frame_slices * dsc->drm->slice_width;
+	this_frame_slices = pic_width / dsc->slice_width;
+	intf_ip_w = this_frame_slices * dsc->slice_width;
 
 	/*
 	 * dsc merge case: when using 2 encoders for the same stream,
@@ -1980,7 +1982,6 @@ static void dpu_encoder_helper_reset_mixers(struct dpu_encoder_phys *phys_enc)
 {
 	struct dpu_hw_mixer_cfg mixer;
 	int i, num_lm;
-	u32 flush_mask = 0;
 	struct dpu_global_state *global_state;
 	struct dpu_hw_blk *hw_lm[2];
 	struct dpu_hw_mixer *hw_mixer[2];
@@ -1999,9 +2000,8 @@ static void dpu_encoder_helper_reset_mixers(struct dpu_encoder_phys *phys_enc)
 
 	for (i = 0; i < num_lm; i++) {
 		hw_mixer[i] = to_dpu_hw_mixer(hw_lm[i]);
-		flush_mask = phys_enc->hw_ctl->ops.get_bitmask_mixer(ctl, hw_mixer[i]->idx);
-		if (phys_enc->hw_ctl->ops.update_pending_flush)
-			phys_enc->hw_ctl->ops.update_pending_flush(ctl, flush_mask);
+		if (phys_enc->hw_ctl->ops.update_pending_flush_mixer)
+			phys_enc->hw_ctl->ops.update_pending_flush_mixer(ctl, hw_mixer[i]->idx);
 
 		/* clear all blendstages */
 		if (phys_enc->hw_ctl->ops.setup_blendstage)
@@ -2234,12 +2234,6 @@ static int dpu_encoder_virt_add_phys_encs(
 	return 0;
 }
 
-static const struct dpu_encoder_virt_ops dpu_encoder_parent_ops = {
-	.handle_vblank_virt = dpu_encoder_vblank_callback,
-	.handle_underrun_virt = dpu_encoder_underrun_callback,
-	.handle_frame_done = dpu_encoder_frame_done_callback,
-};
-
 static int dpu_encoder_setup_display(struct dpu_encoder_virt *dpu_enc,
 				 struct dpu_kms *dpu_kms,
 				 struct msm_display_info *disp_info)
@@ -2259,7 +2253,6 @@ static int dpu_encoder_setup_display(struct dpu_encoder_virt *dpu_enc,
 	memset(&phys_params, 0, sizeof(phys_params));
 	phys_params.dpu_kms = dpu_kms;
 	phys_params.parent = &dpu_enc->base;
-	phys_params.parent_ops = &dpu_encoder_parent_ops;
 	phys_params.enc_spinlock = &dpu_enc->enc_spinlock;
 
 	switch (disp_info->intf_type) {

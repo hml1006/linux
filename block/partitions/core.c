@@ -254,9 +254,9 @@ static void part_release(struct device *dev)
 	iput(dev_to_bdev(dev)->bd_inode);
 }
 
-static int part_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int part_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct block_device *part = dev_to_bdev(dev);
+	const struct block_device *part = dev_to_bdev(dev);
 
 	add_uevent_var(env, "PARTN=%u", part->bd_partno);
 	if (part->bd_meta_info && part->bd_meta_info->volname[0])
@@ -594,6 +594,9 @@ static int blk_add_partitions(struct gendisk *disk)
 	int ret = -EAGAIN, p;
 
 	if (disk->flags & GENHD_FL_NO_PART)
+		return 0;
+
+	if (test_bit(GD_SUPPRESS_PART_SCAN, &disk->state))
 		return 0;
 
 	state = check_partition(disk);

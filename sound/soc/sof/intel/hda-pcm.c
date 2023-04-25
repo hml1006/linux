@@ -18,6 +18,7 @@
 #include <linux/moduleparam.h>
 #include <sound/hda_register.h>
 #include <sound/pcm_params.h>
+#include <trace/events/sof_intel.h>
 #include "../sof-audio.h"
 #include "../ops.h"
 #include "hda.h"
@@ -141,7 +142,6 @@ int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
 int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream)
 {
 	struct hdac_stream *hstream = substream->runtime->private_data;
-	struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(hstream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	ssize_t appl_pos, buf_size;
 	u32 spib;
@@ -155,7 +155,7 @@ int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substrea
 	if (!spib)
 		spib = buf_size;
 
-	sof_io_write(sdev, hext_stream->spib_addr, spib);
+	sof_io_write(sdev, hstream->spib_addr, spib);
 
 	return 0;
 }
@@ -196,8 +196,7 @@ snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 found:
 	pos = bytes_to_frames(substream->runtime, pos);
 
-	dev_vdbg(sdev->dev, "PCM: stream %d dir %d position %lu\n",
-		 hstream->index, substream->stream, pos);
+	trace_sof_intel_hda_dsp_pcm(sdev, hstream, substream, pos);
 	return pos;
 }
 

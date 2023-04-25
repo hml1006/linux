@@ -185,6 +185,13 @@ enum sof_ipc4_pipeline_state {
 #define SOF_IPC4_GLB_PIPE_STATE_MASK		GENMASK(15, 0)
 #define SOF_IPC4_GLB_PIPE_STATE(x)		((x) << SOF_IPC4_GLB_PIPE_STATE_SHIFT)
 
+/* pipeline set state IPC msg extension */
+#define SOF_IPC4_GLB_PIPE_STATE_EXT_MULTI	BIT(0)
+
+/* load library ipc msg */
+#define SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID_SHIFT	16
+#define SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID(x)	((x) << SOF_IPC4_GLB_LOAD_LIBRARY_LIB_ID_SHIFT)
+
 enum sof_ipc4_channel_config {
 	/* one channel only. */
 	SOF_IPC4_CHANNEL_CONFIG_MONO,
@@ -426,6 +433,11 @@ struct sof_ipc4_dx_state_info {
 #define SOF_IPC4_NOTIFICATION_TYPE_MASK		GENMASK(23, 16)
 #define SOF_IPC4_NOTIFICATION_TYPE_GET(x)	(((x) & SOF_IPC4_NOTIFICATION_TYPE_MASK) >> \
 						 SOF_IPC4_NOTIFICATION_TYPE_SHIFT)
+
+#define SOF_IPC4_LOG_CORE_SHIFT			12
+#define SOF_IPC4_LOG_CORE_MASK			GENMASK(15, 12)
+#define SOF_IPC4_LOG_CORE_GET(x)		(((x) & SOF_IPC4_LOG_CORE_MASK) >> \
+						 SOF_IPC4_LOG_CORE_SHIFT)
 
 /* Value of notification type field - must fit into 8 bits */
 enum sof_ipc4_notification_type {

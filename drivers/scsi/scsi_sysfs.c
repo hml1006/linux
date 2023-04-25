@@ -441,17 +441,17 @@ static void scsi_device_cls_release(struct device *class_dev)
 	put_device(&sdev->sdev_gendev);
 }
 
-static void scsi_device_dev_release_usercontext(struct work_struct *work)
+static void scsi_device_dev_release(struct device *dev)
 {
-	struct scsi_device *sdev = container_of(work, struct scsi_device,
-						ew.work);
-	struct scsi_target *starget = sdev->sdev_target;
+	struct scsi_device *sdev = to_scsi_device(dev);
 	struct device *parent;
 	struct list_head *this, *tmp;
 	struct scsi_vpd *vpd_pg80 = NULL, *vpd_pg83 = NULL;
 	struct scsi_vpd *vpd_pg0 = NULL, *vpd_pg89 = NULL;
 	struct scsi_vpd *vpd_pgb0 = NULL, *vpd_pgb1 = NULL, *vpd_pgb2 = NULL;
 	unsigned long flags;
+
+	might_sleep();
 
 	scsi_dh_release_device(sdev);
 
@@ -513,18 +513,8 @@ static void scsi_device_dev_release_usercontext(struct work_struct *work)
 	kfree(sdev->inquiry);
 	kfree(sdev);
 
-	if (starget && atomic_dec_return(&starget->sdev_count) == 0)
-		wake_up(&starget->sdev_wq);
-
 	if (parent)
 		put_device(parent);
-}
-
-static void scsi_device_dev_release(struct device *dev)
-{
-	struct scsi_device *sdp = to_scsi_device(dev);
-	execute_in_process_context(scsi_device_dev_release_usercontext,
-				   &sdp->ew);
 }
 
 static struct class sdev_class = {
@@ -546,9 +536,9 @@ static int scsi_bus_match(struct device *dev, struct device_driver *gendrv)
 	return (sdp->inq_periph_qual == SCSI_INQ_PQ_CON)? 1: 0;
 }
 
-static int scsi_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int scsi_bus_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct scsi_device *sdev;
+	const struct scsi_device *sdev;
 
 	if (dev->type != &scsi_dev_type)
 		return 0;
@@ -822,6 +812,14 @@ store_state_field(struct device *dev, struct device_attribute *attr,
 	}
 
 	mutex_lock(&sdev->state_mutex);
+	switch (sdev->sdev_state) {
+	case SDEV_RUNNING:
+	case SDEV_OFFLINE:
+		break;
+	default:
+		mutex_unlock(&sdev->state_mutex);
+		return -EINVAL;
+	}
 	if (sdev->sdev_state == SDEV_RUNNING && state == SDEV_RUNNING) {
 		ret = 0;
 	} else {
@@ -970,6 +968,7 @@ static DEVICE_ATTR(field, S_IRUGO, show_iostat_##field, NULL)
 show_sdev_iostat(iorequest_cnt);
 show_sdev_iostat(iodone_cnt);
 show_sdev_iostat(ioerr_cnt);
+show_sdev_iostat(iotmo_cnt);
 
 static ssize_t
 sdev_show_modalias(struct device *dev, struct device_attribute *attr, char *buf)
@@ -1289,6 +1288,7 @@ static struct attribute *scsi_sdev_attrs[] = {
 	&dev_attr_iorequest_cnt.attr,
 	&dev_attr_iodone_cnt.attr,
 	&dev_attr_ioerr_cnt.attr,
+	&dev_attr_iotmo_cnt.attr,
 	&dev_attr_modalias.attr,
 	&dev_attr_queue_depth.attr,
 	&dev_attr_queue_type.attr,
@@ -1470,6 +1470,7 @@ void __scsi_remove_device(struct scsi_device *sdev)
 	mutex_unlock(&sdev->state_mutex);
 
 	blk_mq_destroy_queue(sdev->request_queue);
+	kref_put(&sdev->host->tagset_refcnt, scsi_mq_free_tags);
 	cancel_work_sync(&sdev->requeue_work);
 
 	if (sdev->host->hostt->slave_destroy)
@@ -1529,14 +1530,6 @@ static void __scsi_remove_target(struct scsi_target *starget)
 		goto restart;
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
-
-	/*
-	 * After scsi_remove_target() returns its caller can remove resources
-	 * associated with @starget, e.g. an rport or session. Wait until all
-	 * devices associated with @starget have been removed to prevent that
-	 * a SCSI error handling callback function triggers a use-after-free.
-	 */
-	wait_event(starget->sdev_wq, atomic_read(&starget->sdev_count) == 0);
 }
 
 /**
@@ -1647,9 +1640,6 @@ void scsi_sysfs_device_initialize(struct scsi_device *sdev)
 	list_add_tail(&sdev->same_target_siblings, &starget->devices);
 	list_add_tail(&sdev->siblings, &shost->__devices);
 	spin_unlock_irqrestore(shost->host_lock, flags);
-
-	atomic_inc(&starget->sdev_count);
-
 	/*
 	 * device can now only be removed via __scsi_remove_device() so hold
 	 * the target.  Target will be held in CREATED state until something

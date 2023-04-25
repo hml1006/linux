@@ -47,7 +47,6 @@ Contents:
    cdc_mbim
    dccp
    dctcp
-   decnet
    dns_resolver
    driver
    eql
@@ -93,6 +92,7 @@ Contents:
    radiotap-headers
    rds
    regulatory
+   representors
    rxrpc
    sctp
    secid
@@ -104,6 +104,7 @@ Contents:
    switchdev
    sysfs-tagging
    tc-actions-env-rules
+   tc-queue-filters
    tcp-thin
    team
    timestamping
@@ -119,6 +120,7 @@ Contents:
    xfrm_proc
    xfrm_sync
    xfrm_sysctl
+   xdp-rx-metadata
 
 .. only::  subproject and html
 

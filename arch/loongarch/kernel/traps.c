@@ -10,6 +10,7 @@
 #include <linux/entry-common.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/kexec.h>
 #include <linux/module.h>
 #include <linux/extable.h>
 #include <linux/mm.h>
@@ -70,9 +71,6 @@ static void show_backtrace(struct task_struct *task, const struct pt_regs *regs,
 
 	if (!task)
 		task = current;
-
-	if (user_mode(regs))
-		state.type = UNWINDER_GUESS;
 
 	printk("%sCall Trace:", loglvl);
 	for (unwind_start(&state, task, pregs);
@@ -246,6 +244,9 @@ void __noreturn die(const char *str, struct pt_regs *regs)
 
 	oops_exit();
 
+	if (regs && kexec_should_crash(current))
+		crash_kexec(regs);
+
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
@@ -364,14 +365,69 @@ asmlinkage void noinstr do_ade(struct pt_regs *regs)
 	irqentry_exit(regs, state);
 }
 
+/* sysctl hooks */
+int unaligned_enabled __read_mostly = 1;	/* Enabled by default */
+int no_unaligned_warning __read_mostly = 1;	/* Only 1 warning by default */
+
 asmlinkage void noinstr do_ale(struct pt_regs *regs)
 {
 	irqentry_state_t state = irqentry_enter(regs);
 
+#ifndef CONFIG_ARCH_STRICT_ALIGN
 	die_if_kernel("Kernel ale access", regs);
 	force_sig_fault(SIGBUS, BUS_ADRALN, (void __user *)regs->csr_badvaddr);
+#else
+	unsigned int *pc;
 
+	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, regs->csr_badvaddr);
+
+	/*
+	 * Did we catch a fault trying to load an instruction?
+	 */
+	if (regs->csr_badvaddr == regs->csr_era)
+		goto sigbus;
+	if (user_mode(regs) && !test_thread_flag(TIF_FIXADE))
+		goto sigbus;
+	if (!unaligned_enabled)
+		goto sigbus;
+	if (!no_unaligned_warning)
+		show_registers(regs);
+
+	pc = (unsigned int *)exception_era(regs);
+
+	emulate_load_store_insn(regs, (void __user *)regs->csr_badvaddr, pc);
+
+	goto out;
+
+sigbus:
+	die_if_kernel("Kernel ale access", regs);
+	force_sig_fault(SIGBUS, BUS_ADRALN, (void __user *)regs->csr_badvaddr);
+out:
+#endif
 	irqentry_exit(regs, state);
+}
+
+#ifdef CONFIG_GENERIC_BUG
+int is_valid_bugaddr(unsigned long addr)
+{
+	return 1;
+}
+#endif /* CONFIG_GENERIC_BUG */
+
+static void bug_handler(struct pt_regs *regs)
+{
+	switch (report_bug(regs->csr_era, regs)) {
+	case BUG_TRAP_TYPE_BUG:
+	case BUG_TRAP_TYPE_NONE:
+		die_if_kernel("Oops - BUG", regs);
+		force_sig(SIGTRAP);
+		break;
+
+	case BUG_TRAP_TYPE_WARN:
+		/* Skip the BUG instruction and continue */
+		regs->csr_era += LOONGARCH_INSN_SIZE;
+		break;
+	}
 }
 
 asmlinkage void noinstr do_bp(struct pt_regs *regs)
@@ -381,7 +437,9 @@ asmlinkage void noinstr do_bp(struct pt_regs *regs)
 	unsigned long era = exception_era(regs);
 	irqentry_state_t state = irqentry_enter(regs);
 
-	local_irq_enable();
+	if (regs->csr_prmd & CSR_PRMD_PIE)
+		local_irq_enable();
+
 	current->thread.trap_nr = read_csr_excode();
 	if (__get_inst(&opcode, (u32 *)era, user))
 		goto out_sigsegv;
@@ -394,14 +452,12 @@ asmlinkage void noinstr do_bp(struct pt_regs *regs)
 	 */
 	switch (bcode) {
 	case BRK_KPROBE_BP:
-		if (notify_die(DIE_BREAK, "Kprobe", regs, bcode,
-			       current->thread.trap_nr, SIGTRAP) == NOTIFY_STOP)
+		if (kprobe_breakpoint_handler(regs))
 			goto out;
 		else
 			break;
 	case BRK_KPROBE_SSTEPBP:
-		if (notify_die(DIE_SSTEPBP, "Kprobe_SingleStep", regs, bcode,
-			       current->thread.trap_nr, SIGTRAP) == NOTIFY_STOP)
+		if (kprobe_singlestep_handler(regs))
 			goto out;
 		else
 			break;
@@ -427,8 +483,7 @@ asmlinkage void noinstr do_bp(struct pt_regs *regs)
 
 	switch (bcode) {
 	case BRK_BUG:
-		die_if_kernel("Kernel bug detected", regs);
-		force_sig(SIGTRAP);
+		bug_handler(regs);
 		break;
 	case BRK_DIVZERO:
 		die_if_kernel("Break instruction in kernel code", regs);
@@ -445,7 +500,9 @@ asmlinkage void noinstr do_bp(struct pt_regs *regs)
 	}
 
 out:
-	local_irq_disable();
+	if (regs->csr_prmd & CSR_PRMD_PIE)
+		local_irq_disable();
+
 	irqentry_exit(regs, state);
 	return;
 
@@ -456,16 +513,59 @@ out_sigsegv:
 
 asmlinkage void noinstr do_watch(struct pt_regs *regs)
 {
+	irqentry_state_t state = irqentry_enter(regs);
+
+#ifndef CONFIG_HAVE_HW_BREAKPOINT
 	pr_warn("Hardware watch point handler not implemented!\n");
+#else
+	if (test_tsk_thread_flag(current, TIF_SINGLESTEP)) {
+		int llbit = (csr_read32(LOONGARCH_CSR_LLBCTL) & 0x1);
+		unsigned long pc = instruction_pointer(regs);
+		union loongarch_instruction *ip = (union loongarch_instruction *)pc;
+
+		if (llbit) {
+			/*
+			 * When the ll-sc combo is encountered, it is regarded as an single
+			 * instruction. So don't clear llbit and reset CSR.FWPS.Skip until
+			 * the llsc execution is completed.
+			 */
+			csr_write32(CSR_FWPC_SKIP, LOONGARCH_CSR_FWPS);
+			csr_write32(CSR_LLBCTL_KLO, LOONGARCH_CSR_LLBCTL);
+			goto out;
+		}
+
+		if (pc == current->thread.single_step) {
+			/*
+			 * Certain insns are occasionally not skipped when CSR.FWPS.Skip is
+			 * set, such as fld.d/fst.d. So singlestep needs to compare whether
+			 * the csr_era is equal to the value of singlestep which last time set.
+			 */
+			if (!is_self_loop_ins(ip, regs)) {
+				/*
+				 * Check if the given instruction the target pc is equal to the
+				 * current pc, If yes, then we should not set the CSR.FWPS.SKIP
+				 * bit to break the original instruction stream.
+				 */
+				csr_write32(CSR_FWPC_SKIP, LOONGARCH_CSR_FWPS);
+				goto out;
+			}
+		}
+	} else {
+		breakpoint_handler(regs);
+		watchpoint_handler(regs);
+	}
+
+	force_sig(SIGTRAP);
+out:
+#endif
+	irqentry_exit(regs, state);
 }
 
 asmlinkage void noinstr do_ri(struct pt_regs *regs)
 {
-	int status = -1;
+	int status = SIGILL;
 	unsigned int opcode = 0;
 	unsigned int __user *era = (unsigned int __user *)exception_era(regs);
-	unsigned long old_era = regs->csr_era;
-	unsigned long old_ra = regs->regs[1];
 	irqentry_state_t state = irqentry_enter(regs);
 
 	local_irq_enable();
@@ -477,21 +577,12 @@ asmlinkage void noinstr do_ri(struct pt_regs *regs)
 
 	die_if_kernel("Reserved instruction in kernel code", regs);
 
-	compute_return_era(regs);
-
 	if (unlikely(get_user(opcode, era) < 0)) {
 		status = SIGSEGV;
 		current->thread.error_code = 1;
 	}
 
-	if (status < 0)
-		status = SIGILL;
-
-	if (unlikely(status > 0)) {
-		regs->csr_era = old_era;		/* Undo skip-over.  */
-		regs->regs[1] = old_ra;
-		force_sig(status);
-	}
+	force_sig(status);
 
 out:
 	local_irq_disable();
@@ -630,9 +721,6 @@ asmlinkage void noinstr do_vint(struct pt_regs *regs, unsigned long sp)
 
 	irqentry_exit(regs, state);
 }
-
-extern void tlb_init(int cpu);
-extern void cache_error_setup(void);
 
 unsigned long eentry;
 unsigned long tlbrentry;

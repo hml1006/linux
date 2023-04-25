@@ -119,15 +119,6 @@ static inline void mchp_corespi_write(struct mchp_corespi *spi, unsigned int reg
 	writel(val, spi->regs + reg);
 }
 
-static inline void mchp_corespi_enable(struct mchp_corespi *spi)
-{
-	u32 control = mchp_corespi_read(spi, REG_CONTROL);
-
-	control |= CONTROL_ENABLE;
-
-	mchp_corespi_write(spi, REG_CONTROL, control);
-}
-
 static inline void mchp_corespi_disable(struct mchp_corespi *spi)
 {
 	u32 control = mchp_corespi_read(spi, REG_CONTROL);
@@ -548,12 +539,12 @@ static int mchp_corespi_probe(struct platform_device *pdev)
 			       IRQF_SHARED, dev_name(&pdev->dev), master);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
-				     "could not request irq: %d\n", ret);
+				     "could not request irq\n");
 
 	spi->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(spi->clk))
 		return dev_err_probe(&pdev->dev, PTR_ERR(spi->clk),
-				     "could not get clk: %d\n", ret);
+				     "could not get clk\n");
 
 	ret = clk_prepare_enable(spi->clk);
 	if (ret)

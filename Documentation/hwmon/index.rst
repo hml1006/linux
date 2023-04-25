@@ -1,6 +1,8 @@
-=========================
-Linux Hardware Monitoring
-=========================
+.. SPDX-License-Identifier: GPL-2.0
+
+===================
+Hardware Monitoring
+===================
 
 .. toctree::
    :maxdepth: 1
@@ -44,7 +46,6 @@ Hardware Monitoring Kernel Drivers
    asc7621
    aspeed-pwm-tacho
    asus_ec_sensors
-   asus_wmi_ec_sensors
    asus_wmi_sensors
    bcm54140
    bel-pfe
@@ -63,6 +64,7 @@ Hardware Monitoring Kernel Drivers
    ds620
    emc1403
    emc2103
+   emc2305
    emc6w201
    f71805f
    f71882fg
@@ -73,6 +75,7 @@ Hardware Monitoring Kernel Drivers
    g762
    gsc-hwmon
    gl518sm
+   gxp-fan-ctrl
    hih6130
    ibmaem
    ibm-cffps
@@ -133,6 +136,7 @@ Hardware Monitoring Kernel Drivers
    max20751
    max31722
    max31730
+   max31760
    max31785
    max31790
    max34440
@@ -143,6 +147,7 @@ Hardware Monitoring Kernel Drivers
    max6697
    max8688
    mc13783-adc
+   mc34vr500
    mcp3021
    menf21bmc
    mlxreg-fan
@@ -159,6 +164,7 @@ Hardware Monitoring Kernel Drivers
    nzxt-kraken2
    nzxt-smart2
    occ
+   oxp-sensors
    pc87360
    pc87427
    pcf8591
@@ -186,6 +192,7 @@ Hardware Monitoring Kernel Drivers
    sis5595
    sl28cpld
    smm665
+   smpro-hwmon
    smsc47b397
    smsc47m192
    smsc47m1
@@ -205,6 +212,7 @@ Hardware Monitoring Kernel Drivers
    tps23861
    tps40422
    tps53679
+   tps546d24
    twl4030-madc-hwmon
    ucd9000
    ucd9200

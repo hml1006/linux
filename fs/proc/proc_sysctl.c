@@ -28,13 +28,6 @@ static const struct inode_operations proc_sys_inode_operations;
 static const struct file_operations proc_sys_dir_file_operations;
 static const struct inode_operations proc_sys_dir_operations;
 
-/* shared constants to be used in various sysctls */
-const int sysctl_vals[] = { 0, 1, 2, 3, 4, 100, 200, 1000, 3000, INT_MAX, 65535, -1 };
-EXPORT_SYMBOL(sysctl_vals);
-
-const unsigned long sysctl_long_vals[] = { 0, 1, LONG_MAX };
-EXPORT_SYMBOL_GPL(sysctl_long_vals);
-
 /* Support for permanently empty directories */
 
 struct ctl_table sysctl_mount_point[] = {
@@ -805,7 +798,7 @@ out:
 	return 0;
 }
 
-static int proc_sys_permission(struct user_namespace *mnt_userns,
+static int proc_sys_permission(struct mnt_idmap *idmap,
 			       struct inode *inode, int mask)
 {
 	/*
@@ -834,7 +827,7 @@ static int proc_sys_permission(struct user_namespace *mnt_userns,
 	return error;
 }
 
-static int proc_sys_setattr(struct user_namespace *mnt_userns,
+static int proc_sys_setattr(struct mnt_idmap *idmap,
 			    struct dentry *dentry, struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
@@ -843,16 +836,16 @@ static int proc_sys_setattr(struct user_namespace *mnt_userns,
 	if (attr->ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID))
 		return -EPERM;
 
-	error = setattr_prepare(&init_user_ns, dentry, attr);
+	error = setattr_prepare(&nop_mnt_idmap, dentry, attr);
 	if (error)
 		return error;
 
-	setattr_copy(&init_user_ns, inode, attr);
+	setattr_copy(&nop_mnt_idmap, inode, attr);
 	mark_inode_dirty(inode);
 	return 0;
 }
 
-static int proc_sys_getattr(struct user_namespace *mnt_userns,
+static int proc_sys_getattr(struct mnt_idmap *idmap,
 			    const struct path *path, struct kstat *stat,
 			    u32 request_mask, unsigned int query_flags)
 {
@@ -863,7 +856,7 @@ static int proc_sys_getattr(struct user_namespace *mnt_userns,
 	if (IS_ERR(head))
 		return PTR_ERR(head);
 
-	generic_fillattr(&init_user_ns, inode, stat);
+	generic_fillattr(&nop_mnt_idmap, inode, stat);
 	if (table)
 		stat->mode = (stat->mode & S_IFMT) | table->mode;
 
@@ -1131,6 +1124,11 @@ static int sysctl_check_table_array(const char *path, struct ctl_table *table)
 			err |= sysctl_err(path, table, "array not allowed");
 	}
 
+	if (table->proc_handler == proc_dobool) {
+		if (table->maxlen != sizeof(bool))
+			err |= sysctl_err(path, table, "array not allowed");
+	}
+
 	return err;
 }
 
@@ -1143,6 +1141,7 @@ static int sysctl_check_table(const char *path, struct ctl_table *table)
 			err |= sysctl_err(path, entry, "Not a file");
 
 		if ((entry->proc_handler == proc_dostring) ||
+		    (entry->proc_handler == proc_dobool) ||
 		    (entry->proc_handler == proc_dointvec) ||
 		    (entry->proc_handler == proc_douintvec) ||
 		    (entry->proc_handler == proc_douintvec_minmax) ||
@@ -1246,7 +1245,7 @@ static bool get_links(struct ctl_dir *dir,
 static int insert_links(struct ctl_table_header *head)
 {
 	struct ctl_table_set *root_set = &sysctl_table_root.default_set;
-	struct ctl_dir *core_parent = NULL;
+	struct ctl_dir *core_parent;
 	struct ctl_table_header *links;
 	int err;
 

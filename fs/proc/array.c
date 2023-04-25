@@ -279,7 +279,7 @@ static inline void task_sig(struct seq_file *m, struct task_struct *p)
 		collect_sigign_sigcatch(p, &ignored, &caught);
 		num_threads = get_nr_threads(p);
 		rcu_read_lock();  /* FIXME: is this correct? */
-		qsize = get_ucounts_value(task_ucounts(p), UCOUNT_RLIMIT_SIGPENDING);
+		qsize = get_rlimit_value(task_ucounts(p), UCOUNT_RLIMIT_SIGPENDING);
 		rcu_read_unlock();
 		qlim = task_rlimit(p, RLIMIT_SIGPENDING);
 		unlock_task_sighand(p, &flags);
@@ -300,13 +300,8 @@ static inline void task_sig(struct seq_file *m, struct task_struct *p)
 static void render_cap_t(struct seq_file *m, const char *header,
 			kernel_cap_t *a)
 {
-	unsigned __capi;
-
 	seq_puts(m, header);
-	CAP_FOR_EACH_U32(__capi) {
-		seq_put_hex_ll(m, NULL,
-			   a->cap[CAP_LAST_U32 - __capi], 8);
-	}
+	seq_put_hex_ll(m, NULL, a->val, 16);
 	seq_putc(m, '\n');
 }
 

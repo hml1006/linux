@@ -18,7 +18,7 @@ maintainers:
   - Martin Povišer <povik+lin@cutebit.org>
 
 allOf:
-  - $ref: "dma-controller.yaml#"
+  - $ref: dma-controller.yaml#
 
 properties:
   compatible:
@@ -48,6 +48,16 @@ properties:
       source. The remaining interrupts will be left without a valid value, e.g.
       in an interrupts-extended list the disconnected positions will contain
       an empty phandle reference <0>.
+
+  iommus:
+    minItems: 1
+    maxItems: 2
+
+  power-domains:
+    maxItems: 1
+
+  resets:
+    maxItems: 1
 
 required:
   - compatible

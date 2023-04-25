@@ -30,6 +30,7 @@
 #include "os_types.h"
 #include "../dc_features.h"
 #include "../display_mode_structs.h"
+#include "../display_mode_vba.h"
 
 unsigned int dml32_dscceComputeDelay(
 		unsigned int bpc,
@@ -215,6 +216,7 @@ void dml32_CalculateDETBufferSize(
 void dml32_CalculateODMMode(
 		unsigned int MaximumPixelsPerLinePerDSCUnit,
 		unsigned int HActive,
+		enum output_format_class OutFormat,
 		enum output_encoder_class Output,
 		enum odm_combine_policy ODMUse,
 		double StateDispclk,
@@ -226,6 +228,7 @@ void dml32_CalculateODMMode(
 		double DISPCLKDPPCLKDSCCLKDownSpreading,
 		double DISPCLKRampingMargin,
 		double DISPCLKDPPCLKVCOSpeed,
+		unsigned int NumberOfDSCSlices,
 
 		/* Output */
 		bool *TotalAvailablePipesSupport,
@@ -324,12 +327,14 @@ unsigned int dml32_DSCDelayRequirement(bool DSCEnabled,
 		enum output_format_class  OutputFormat,
 		enum output_encoder_class Output,
 		double PixelClock,
-		double PixelClockBackEnd);
+		double PixelClockBackEnd,
+		double dsc_delay_factor_wa);
 
 void dml32_CalculateSurfaceSizeInMall(
 		unsigned int NumberOfActiveSurfaces,
 		unsigned int MALLAllocatedForDCN,
 		enum dm_use_mall_for_static_screen_mode UseMALLForStaticScreen[],
+		enum dm_use_mall_for_pstate_change_mode UsesMALLForPStateChange[],
 		bool DCCEnable[],
 		bool ViewportStationary[],
 		unsigned int ViewportXStartY[],
@@ -354,6 +359,8 @@ void dml32_CalculateSurfaceSizeInMall(
 		unsigned int ReadBlockWidthC[],
 		unsigned int ReadBlockHeightY[],
 		unsigned int ReadBlockHeightC[],
+		unsigned int DCCMetaPitchY[],
+		unsigned int DCCMetaPitchC[],
 
 		/* Output */
 		unsigned int    SurfaceSizeInMALL[],
@@ -712,28 +719,14 @@ double dml32_CalculateExtraLatency(
 		unsigned int HostVMMaxNonCachedPageTableLevels);
 
 bool dml32_CalculatePrefetchSchedule(
+		struct vba_vars_st *v,
+		unsigned int k,
 		double HostVMInefficiencyFactor,
 		DmlPipe *myPipe,
 		unsigned int DSCDelay,
-		double DPPCLKDelaySubtotalPlusCNVCFormater,
-		double DPPCLKDelaySCL,
-		double DPPCLKDelaySCLLBOnly,
-		double DPPCLKDelayCNVCCursor,
-		double DISPCLKDelaySubtotal,
 		unsigned int DPP_RECOUT_WIDTH,
-		enum output_format_class OutputFormat,
-		unsigned int MaxInterDCNTileRepeaters,
 		unsigned int VStartup,
 		unsigned int MaxVStartup,
-		unsigned int GPUVMPageTableLevels,
-		bool GPUVMEnable,
-		bool HostVMEnable,
-		unsigned int HostVMMaxNonCachedPageTableLevels,
-		double HostVMMinPageSize,
-		bool DynamicMetadataEnable,
-		bool DynamicMetadataVMEnabled,
-		int DynamicMetadataLinesBeforeActiveRequired,
-		unsigned int DynamicMetadataTransmittedBytes,
 		double UrgentLatency,
 		double UrgentExtraLatency,
 		double TCalc,
@@ -753,6 +746,7 @@ bool dml32_CalculatePrefetchSchedule(
 		unsigned int SwathHeightY,
 		unsigned int SwathHeightC,
 		double TWait,
+		double TPreReq,
 		/* Output */
 		double   *DSTXAfterScaler,
 		double   *DSTYAfterScaler,
@@ -807,58 +801,28 @@ void dml32_CalculateFlipSchedule(
 		bool *ImmediateFlipSupportedForPipe);
 
 void dml32_CalculateWatermarksMALLUseAndDRAMSpeedChangeSupport(
-		bool USRRetrainingRequiredFinal,
-		enum dm_use_mall_for_pstate_change_mode UseMALLForPStateChange[],
+		struct vba_vars_st *v,
 		unsigned int PrefetchMode,
-		unsigned int NumberOfActiveSurfaces,
-		unsigned int MaxLineBufferLines,
-		unsigned int LineBufferSize,
-		unsigned int WritebackInterfaceBufferSize,
 		double DCFCLK,
 		double ReturnBW,
-		bool SynchronizeTimingsFinal,
-		bool SynchronizeDRRDisplaysForUCLKPStateChangeFinal,
-		bool DRRDisplay[],
-		unsigned int dpte_group_bytes[],
-		unsigned int meta_row_height[],
-		unsigned int meta_row_height_chroma[],
 		SOCParametersList mmSOCParameters,
-		unsigned int WritebackChunkSize,
 		double SOCCLK,
 		double DCFClkDeepSleep,
 		unsigned int DETBufferSizeY[],
 		unsigned int DETBufferSizeC[],
 		unsigned int SwathHeightY[],
 		unsigned int SwathHeightC[],
-		unsigned int LBBitPerPixel[],
 		double SwathWidthY[],
 		double SwathWidthC[],
-		double HRatio[],
-		double HRatioChroma[],
-		unsigned int VTaps[],
-		unsigned int VTapsChroma[],
-		double VRatio[],
-		double VRatioChroma[],
-		unsigned int HTotal[],
-		unsigned int VTotal[],
-		unsigned int VActive[],
-		double PixelClock[],
-		unsigned int BlendingAndTiming[],
 		unsigned int DPPPerSurface[],
 		double BytePerPixelDETY[],
 		double BytePerPixelDETC[],
 		double DSTXAfterScaler[],
 		double DSTYAfterScaler[],
-		bool WritebackEnable[],
-		enum source_format_class WritebackPixelFormat[],
-		double WritebackDestinationWidth[],
-		double WritebackDestinationHeight[],
-		double WritebackSourceHeight[],
 		bool UnboundedRequestEnabled,
 		unsigned int CompressedBufferSizeInkByte,
 
 		/* Output */
-		Watermarks *Watermark,
 		enum clock_change_support *DRAMClockChangeSupport,
 		double MaxActiveDRAMClockChangeLatencySupported[],
 		unsigned int SubViewportLinesNeededInMALL[],
@@ -1132,9 +1096,12 @@ void dml32_CalculatePrefetchBandwithSupport(unsigned int NumberOfActiveSurfaces,
 		double UrgentBurstFactorLumaPre[],
 		double UrgentBurstFactorChromaPre[],
 		double UrgentBurstFactorCursorPre[],
+		double PrefetchBW[],
+		double VRatio[],
+		double MaxVRatioPre,
 
 		/* output */
-		double  *PrefetchBandwidth,
+		double  *MaxPrefetchBandwidth,
 		double  *FractionOfUrgentBandwidth,
 		bool *PrefetchBandwidthSupport);
 
@@ -1179,5 +1146,23 @@ void dml32_CalculateImmediateFlipBandwithSupport(unsigned int NumberOfActiveSurf
 		double  *TotalBandwidth,
 		double  *FractionOfUrgentBandwidth,
 		bool *ImmediateFlipBandwidthSupport);
+
+bool dml32_CalculateDETSwathFillLatencyHiding(unsigned int NumberOfActiveSurfaces,
+		double ReturnBW,
+		double UrgentLatency,
+		unsigned int SwathHeightY[],
+		unsigned int SwathHeightC[],
+		unsigned int SwathWidthY[],
+		unsigned int SwathWidthC[],
+		double  BytePerPixelInDETY[],
+		double  BytePerPixelInDETC[],
+		unsigned int    DETBufferSizeY[],
+		unsigned int    DETBufferSizeC[],
+		unsigned int	NumOfDPP[],
+		unsigned int	HTotal[],
+		double	PixelClock[],
+		double	VRatioY[],
+		double	VRatioC[],
+		enum dm_use_mall_for_pstate_change_mode UsesMALLForPStateChange[]);
 
 #endif

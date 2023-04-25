@@ -72,7 +72,7 @@ static ssize_t pmdown_time_show(struct device *dev,
 {
 	struct snd_soc_pcm_runtime *rtd = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%ld\n", rtd->pmdown_time);
+	return sysfs_emit(buf, "%ld\n", rtd->pmdown_time);
 }
 
 static ssize_t pmdown_time_store(struct device *dev,
@@ -107,7 +107,7 @@ static umode_t soc_dev_attr_is_visible(struct kobject *kobj,
 
 	if (attr == &dev_attr_pmdown_time.attr)
 		return attr->mode; /* always visible */
-	return rtd->num_codecs ? attr->mode : 0; /* enabled only with codec */
+	return rtd->dai_link->num_codecs ? attr->mode : 0; /* enabled only with codec */
 }
 
 static const struct attribute_group soc_dapm_dev_group = {
@@ -447,7 +447,7 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	 */
 	rtd = devm_kzalloc(dev,
 			   sizeof(*rtd) +
-			   sizeof(*component) * (dai_link->num_cpus +
+			   sizeof(component) * (dai_link->num_cpus +
 						 dai_link->num_codecs +
 						 dai_link->num_platforms),
 			   GFP_KERNEL);
@@ -482,11 +482,10 @@ static struct snd_soc_pcm_runtime *soc_new_pcm_runtime(
 	 *	asoc_rtd_to_cpu()
 	 *	asoc_rtd_to_codec()
 	 */
-	rtd->num_cpus	= dai_link->num_cpus;
-	rtd->num_codecs	= dai_link->num_codecs;
 	rtd->card	= card;
 	rtd->dai_link	= dai_link;
 	rtd->num	= card->num_rtd++;
+	rtd->pmdown_time = pmdown_time;			/* default power off timeout */
 
 	/* see for_each_card_rtds */
 	list_add_tail(&rtd->list, &card->rtd_list);
@@ -554,7 +553,7 @@ int snd_soc_suspend(struct device *dev)
 	int i;
 
 	/* If the card is not initialized yet there is nothing to do */
-	if (!card->instantiated)
+	if (!snd_soc_card_is_instantiated(card))
 		return 0;
 
 	/*
@@ -696,7 +695,7 @@ int snd_soc_resume(struct device *dev)
 	struct snd_soc_component *component;
 
 	/* If the card is not initialized yet there is nothing to do */
-	if (!card->instantiated)
+	if (!snd_soc_card_is_instantiated(card))
 		return 0;
 
 	/* activate pins from sleep state */
@@ -939,9 +938,6 @@ void snd_soc_remove_pcm_runtime(struct snd_soc_card *card,
 				struct snd_soc_pcm_runtime *rtd)
 {
 	lockdep_assert_held(&client_mutex);
-
-	/* release machine specific resources */
-	snd_soc_link_exit(rtd);
 
 	/*
 	 * Notify the machine driver for extra destruction
@@ -1246,9 +1242,6 @@ static int soc_init_pcm_runtime(struct snd_soc_card *card,
 	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	struct snd_soc_component *component;
 	int ret, num, i;
-
-	/* set default power off timeout */
-	rtd->pmdown_time = pmdown_time;
 
 	/* do machine specific initialization */
 	ret = snd_soc_link_init(rtd);
@@ -1840,21 +1833,22 @@ match:
 	}
 }
 
-#define soc_setup_card_name(name, name1, name2, norm)		\
-	__soc_setup_card_name(name, sizeof(name), name1, name2, norm)
-static void __soc_setup_card_name(char *name, int len,
-				  const char *name1, const char *name2,
-				  int normalization)
+#define soc_setup_card_name(card, name, name1, name2) \
+	__soc_setup_card_name(card, name, sizeof(name), name1, name2)
+static void __soc_setup_card_name(struct snd_soc_card *card,
+				  char *name, int len,
+				  const char *name1, const char *name2)
 {
+	const char *src = name1 ? name1 : name2;
 	int i;
 
-	snprintf(name, len, "%s", name1 ? name1 : name2);
+	snprintf(name, len, "%s", src);
 
-	if (!normalization)
+	if (name != card->snd_card->driver)
 		return;
 
 	/*
-	 * Name normalization
+	 * Name normalization (driver field)
 	 *
 	 * The driver name is somewhat special, as it's used as a key for
 	 * searches in the user-space.
@@ -1874,6 +1868,14 @@ static void __soc_setup_card_name(char *name, int len,
 			break;
 		}
 	}
+
+	/*
+	 * The driver field should contain a valid string from the user view.
+	 * The wrapping usually does not work so well here. Set a smaller string
+	 * in the specific ASoC driver.
+	 */
+	if (strlen(src) > len - 1)
+		dev_err(card->dev, "ASoC: driver name too long '%s' -> '%s'\n", src, name);
 }
 
 static void soc_cleanup_card_resources(struct snd_soc_card *card)
@@ -1885,6 +1887,9 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 
 	snd_soc_dapm_shutdown(card);
 
+	/* release machine specific resources */
+	for_each_card_rtds(card, rtd)
+		snd_soc_link_exit(rtd);
 	/* remove and free each DAI */
 	soc_remove_link_dais(card);
 	soc_remove_link_components(card);
@@ -1910,7 +1915,7 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 
 static void snd_soc_unbind_card(struct snd_soc_card *card, bool unregister)
 {
-	if (card->instantiated) {
+	if (snd_soc_card_is_instantiated(card)) {
 		card->instantiated = false;
 		snd_soc_flush_all_delayed_work(card);
 
@@ -2041,12 +2046,12 @@ static int snd_soc_bind_card(struct snd_soc_card *card)
 	/* try to set some sane longname if DMI is available */
 	snd_soc_set_dmi_name(card, NULL);
 
-	soc_setup_card_name(card->snd_card->shortname,
-			    card->name, NULL, 0);
-	soc_setup_card_name(card->snd_card->longname,
-			    card->long_name, card->name, 0);
-	soc_setup_card_name(card->snd_card->driver,
-			    card->driver_name, card->name, 1);
+	soc_setup_card_name(card, card->snd_card->shortname,
+			    card->name, NULL);
+	soc_setup_card_name(card, card->snd_card->longname,
+			    card->long_name, card->name);
+	soc_setup_card_name(card, card->snd_card->driver,
+			    card->driver_name, card->name);
 
 	if (card->components) {
 		/* the current implementation of snd_component_add() accepts */
@@ -2121,7 +2126,7 @@ int snd_soc_poweroff(struct device *dev)
 	struct snd_soc_card *card = dev_get_drvdata(dev);
 	struct snd_soc_component *component;
 
-	if (!card->instantiated)
+	if (!snd_soc_card_is_instantiated(card))
 		return 0;
 
 	/*
@@ -3472,10 +3477,23 @@ EXPORT_SYMBOL_GPL(snd_soc_of_get_dai_link_cpus);
 
 static int __init snd_soc_init(void)
 {
-	snd_soc_debugfs_init();
-	snd_soc_util_init();
+	int ret;
 
-	return platform_driver_register(&soc_driver);
+	snd_soc_debugfs_init();
+	ret = snd_soc_util_init();
+	if (ret)
+		goto err_util_init;
+
+	ret = platform_driver_register(&soc_driver);
+	if (ret)
+		goto err_register;
+	return 0;
+
+err_register:
+	snd_soc_util_exit();
+err_util_init:
+	snd_soc_debugfs_exit();
+	return ret;
 }
 module_init(snd_soc_init);
 

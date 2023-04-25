@@ -169,8 +169,7 @@ static const struct iio_info mma7660_info = {
 	.attrs			= &mma7660_attribute_group,
 };
 
-static int mma7660_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int mma7660_probe(struct i2c_client *client)
 {
 	int ret;
 	struct iio_dev *indio_dev;
@@ -207,7 +206,7 @@ static int mma7660_probe(struct i2c_client *client,
 	return ret;
 }
 
-static int mma7660_remove(struct i2c_client *client)
+static void mma7660_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	int ret;
@@ -218,8 +217,6 @@ static int mma7660_remove(struct i2c_client *client)
 	if (ret)
 		dev_warn(&client->dev, "Failed to put device in stand-by mode (%pe), ignoring\n",
 			 ERR_PTR(ret));
-
-	return 0;
 }
 
 static int mma7660_suspend(struct device *dev)
@@ -269,7 +266,7 @@ static struct i2c_driver mma7660_driver = {
 		.of_match_table = mma7660_of_match,
 		.acpi_match_table = mma7660_acpi_id,
 	},
-	.probe		= mma7660_probe,
+	.probe_new	= mma7660_probe,
 	.remove		= mma7660_remove,
 	.id_table	= mma7660_i2c_id,
 };

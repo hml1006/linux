@@ -12,7 +12,12 @@
 #include <linux/if_vlan.h>
 #include <net/switchdev.h>
 
-#include "dsa_priv.h"
+#include "dsa.h"
+#include "netlink.h"
+#include "port.h"
+#include "slave.h"
+#include "switch.h"
+#include "tag_8021q.h"
 
 static unsigned int dsa_switch_fastest_ageing_time(struct dsa_switch *ds,
 						   unsigned int ageing_time)
@@ -398,8 +403,15 @@ static int dsa_switch_host_fdb_add(struct dsa_switch *ds,
 
 	dsa_switch_for_each_port(dp, ds) {
 		if (dsa_port_host_address_match(dp, info->dp)) {
-			err = dsa_port_do_fdb_add(dp, info->addr, info->vid,
-						  info->db);
+			if (dsa_port_is_cpu(dp) && info->dp->cpu_port_in_lag) {
+				err = dsa_switch_do_lag_fdb_add(ds, dp->lag,
+								info->addr,
+								info->vid,
+								info->db);
+			} else {
+				err = dsa_port_do_fdb_add(dp, info->addr,
+							  info->vid, info->db);
+			}
 			if (err)
 				break;
 		}
@@ -419,8 +431,15 @@ static int dsa_switch_host_fdb_del(struct dsa_switch *ds,
 
 	dsa_switch_for_each_port(dp, ds) {
 		if (dsa_port_host_address_match(dp, info->dp)) {
-			err = dsa_port_do_fdb_del(dp, info->addr, info->vid,
-						  info->db);
+			if (dsa_port_is_cpu(dp) && info->dp->cpu_port_in_lag) {
+				err = dsa_switch_do_lag_fdb_del(ds, dp->lag,
+								info->addr,
+								info->vid,
+								info->db);
+			} else {
+				err = dsa_port_do_fdb_del(dp, info->addr,
+							  info->vid, info->db);
+			}
 			if (err)
 				break;
 		}
@@ -507,12 +526,12 @@ static int dsa_switch_lag_join(struct dsa_switch *ds,
 {
 	if (info->dp->ds == ds && ds->ops->port_lag_join)
 		return ds->ops->port_lag_join(ds, info->dp->index, info->lag,
-					      info->info);
+					      info->info, info->extack);
 
 	if (info->dp->ds != ds && ds->ops->crosschip_lag_join)
 		return ds->ops->crosschip_lag_join(ds, info->dp->ds->index,
 						   info->dp->index, info->lag,
-						   info->info);
+						   info->info, info->extack);
 
 	return -EOPNOTSUPP;
 }
@@ -997,6 +1016,52 @@ static int dsa_switch_event(struct notifier_block *nb,
 			event, err);
 
 	return notifier_from_errno(err);
+}
+
+/**
+ * dsa_tree_notify - Execute code for all switches in a DSA switch tree.
+ * @dst: collection of struct dsa_switch devices to notify.
+ * @e: event, must be of type DSA_NOTIFIER_*
+ * @v: event-specific value.
+ *
+ * Given a struct dsa_switch_tree, this can be used to run a function once for
+ * each member DSA switch. The other alternative of traversing the tree is only
+ * through its ports list, which does not uniquely list the switches.
+ */
+int dsa_tree_notify(struct dsa_switch_tree *dst, unsigned long e, void *v)
+{
+	struct raw_notifier_head *nh = &dst->nh;
+	int err;
+
+	err = raw_notifier_call_chain(nh, e, v);
+
+	return notifier_to_errno(err);
+}
+
+/**
+ * dsa_broadcast - Notify all DSA trees in the system.
+ * @e: event, must be of type DSA_NOTIFIER_*
+ * @v: event-specific value.
+ *
+ * Can be used to notify the switching fabric of events such as cross-chip
+ * bridging between disjoint trees (such as islands of tagger-compatible
+ * switches bridged by an incompatible middle switch).
+ *
+ * WARNING: this function is not reliable during probe time, because probing
+ * between trees is asynchronous and not all DSA trees might have probed.
+ */
+int dsa_broadcast(unsigned long e, void *v)
+{
+	struct dsa_switch_tree *dst;
+	int err = 0;
+
+	list_for_each_entry(dst, &dsa_tree_list, list) {
+		err = dsa_tree_notify(dst, e, v);
+		if (err)
+			break;
+	}
+
+	return err;
 }
 
 int dsa_switch_register_notifier(struct dsa_switch *ds)

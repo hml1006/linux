@@ -599,7 +599,7 @@ static int ucsi_stm32g0_probe_bootloader(struct ucsi *ucsi)
 		g0->i2c_bl = i2c_new_dummy_device(g0->client->adapter, STM32G0_I2C_BL_ADDR);
 		if (IS_ERR(g0->i2c_bl)) {
 			ret = dev_err_probe(g0->dev, PTR_ERR(g0->i2c_bl),
-					    "Failed to register booloader I2C address\n");
+					    "Failed to register bootloader I2C address\n");
 			return ret;
 		}
 	}
@@ -626,7 +626,7 @@ static int ucsi_stm32g0_probe_bootloader(struct ucsi *ucsi)
 	return 0;
 }
 
-static int ucsi_stm32g0_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int ucsi_stm32g0_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct ucsi_stm32g0 *g0;
@@ -688,7 +688,7 @@ destroy:
 	return ret;
 }
 
-static int ucsi_stm32g0_remove(struct i2c_client *client)
+static void ucsi_stm32g0_remove(struct i2c_client *client)
 {
 	struct ucsi_stm32g0 *g0 = i2c_get_clientdata(client);
 
@@ -697,8 +697,6 @@ static int ucsi_stm32g0_remove(struct i2c_client *client)
 	if (g0->fw_name)
 		i2c_unregister_device(g0->i2c_bl);
 	ucsi_destroy(g0->ucsi);
-
-	return 0;
 }
 
 static int ucsi_stm32g0_suspend(struct device *dev)
@@ -765,7 +763,7 @@ static struct i2c_driver ucsi_stm32g0_i2c_driver = {
 		.of_match_table = of_match_ptr(ucsi_stm32g0_typec_of_match),
 		.pm = pm_sleep_ptr(&ucsi_stm32g0_pm_ops),
 	},
-	.probe = ucsi_stm32g0_probe,
+	.probe_new = ucsi_stm32g0_probe,
 	.remove = ucsi_stm32g0_remove,
 	.id_table = ucsi_stm32g0_typec_i2c_devid
 };

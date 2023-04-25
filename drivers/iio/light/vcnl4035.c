@@ -539,8 +539,7 @@ static int vcnl4035_probe_trigger(struct iio_dev *indio_dev)
 	return ret;
 }
 
-static int vcnl4035_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static int vcnl4035_probe(struct i2c_client *client)
 {
 	struct vcnl4035_data *data;
 	struct iio_dev *indio_dev;
@@ -601,7 +600,7 @@ fail_poweroff:
 	return ret;
 }
 
-static int vcnl4035_remove(struct i2c_client *client)
+static void vcnl4035_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	int ret;
@@ -616,8 +615,6 @@ static int vcnl4035_remove(struct i2c_client *client)
 	if (ret)
 		dev_warn(&client->dev, "Failed to put device into standby (%pe)\n",
 			 ERR_PTR(ret));
-
-	return 0;
 }
 
 static int vcnl4035_runtime_suspend(struct device *dev)
@@ -670,7 +667,7 @@ static struct i2c_driver vcnl4035_driver = {
 		.pm	= pm_ptr(&vcnl4035_pm_ops),
 		.of_match_table = vcnl4035_of_match,
 	},
-	.probe  = vcnl4035_probe,
+	.probe_new = vcnl4035_probe,
 	.remove	= vcnl4035_remove,
 	.id_table = vcnl4035_id,
 };

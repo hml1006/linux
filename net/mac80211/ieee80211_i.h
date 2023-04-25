@@ -213,6 +213,7 @@ struct ieee80211_rx_data {
 	struct ieee80211_sub_if_data *sdata;
 	struct ieee80211_link_data *link;
 	struct sta_info *sta;
+	struct link_sta_info *link_sta;
 	struct ieee80211_key *key;
 
 	unsigned int flags;
@@ -326,7 +327,6 @@ struct mesh_stats {
 	__u32 fwded_frames;		/* Mesh total forwarded frames */
 	__u32 dropped_frames_ttl;	/* Not transmitted since mesh_ttl == 0*/
 	__u32 dropped_frames_no_route;	/* Not transmitted, no route found */
-	__u32 dropped_frames_congestion;/* Not forwarded due to congestion */
 };
 
 #define PREQ_Q_F_START		0x1
@@ -389,6 +389,7 @@ struct ieee80211_mgd_auth_data {
 	bool done, waiting;
 	bool peer_confirmed;
 	bool timeout_started;
+	int link_id;
 
 	u8 ap_addr[ETH_ALEN] __aligned(2);
 
@@ -411,6 +412,8 @@ struct ieee80211_mgd_assoc_data {
 		u8 *elems; /* pointing to inside ie[] below */
 
 		ieee80211_conn_flags_t conn_flags;
+
+		u16 status;
 	} link[IEEE80211_MLD_MAX_NUM_LINKS];
 
 	u8 ap_addr[ETH_ALEN] __aligned(2);
@@ -834,7 +837,7 @@ enum txq_info_flags {
 	IEEE80211_TXQ_STOP,
 	IEEE80211_TXQ_AMPDU,
 	IEEE80211_TXQ_NO_AMSDU,
-	IEEE80211_TXQ_STOP_NETIF_TX,
+	IEEE80211_TXQ_DIRTY,
 };
 
 /**
@@ -970,6 +973,8 @@ struct ieee80211_link_data {
 	struct cfg80211_chan_def csa_chandef;
 
 	struct work_struct color_change_finalize_work;
+	struct delayed_work color_collision_detect_work;
+	u64 color_bitmap;
 
 	/* context reservation -- protected with chanctx_mtx */
 	struct ieee80211_chanctx *reserved_chanctx;
@@ -1079,6 +1084,10 @@ struct ieee80211_sub_if_data {
 
 	struct ieee80211_link_data deflink;
 	struct ieee80211_link_data __rcu *link[IEEE80211_MLD_MAX_NUM_LINKS];
+
+	/* for ieee80211_set_active_links_async() */
+	struct work_struct activate_links_work;
+	u16 desired_active_links;
 
 #ifdef CONFIG_MAC80211_DEBUGFS
 	struct {
@@ -1274,6 +1283,9 @@ struct ieee80211_local {
 	spinlock_t active_txq_lock[IEEE80211_NUM_ACS];
 	struct list_head active_txqs[IEEE80211_NUM_ACS];
 	u16 schedule_round[IEEE80211_NUM_ACS];
+
+	/* serializes ieee80211_handle_wake_tx_queue */
+	spinlock_t handle_wake_tx_queue_lock;
 
 	u16 airtime_flags;
 	u32 aql_txq_limit_low[IEEE80211_NUM_ACS];
@@ -1702,8 +1714,27 @@ struct ieee802_11_elems {
 	u8 tx_pwr_env_num;
 	u8 eht_cap_len;
 
+	/* mult-link element can be de-fragmented and thus u8 is not sufficient */
+	size_t multi_link_len;
+
+	/*
+	 * store the per station profile pointer and length in case that the
+	 * parsing also handled Multi-Link element parsing for a specific link
+	 * ID.
+	 */
+	struct ieee80211_mle_per_sta_profile *prof;
+	size_t sta_prof_len;
+
 	/* whether a parse error occurred while retrieving these elements */
 	bool parse_error;
+
+	/*
+	 * scratch buffer that can be used for various element parsing related
+	 * tasks, e.g., element de-fragmentation etc.
+	 */
+	size_t scratch_len;
+	u8 *scratch_pos;
+	u8 scratch[];
 };
 
 static inline struct ieee80211_local *hw_to_local(
@@ -1810,6 +1841,7 @@ void ieee80211_sta_connection_lost(struct ieee80211_sub_if_data *sdata,
 				   u8 reason, bool tx);
 void ieee80211_mgd_setup_link(struct ieee80211_link_data *link);
 void ieee80211_mgd_stop_link(struct ieee80211_link_data *link);
+void ieee80211_mgd_set_link_qos_params(struct ieee80211_link_data *link);
 
 /* IBSS code */
 void ieee80211_ibss_notify_scan_completed(struct ieee80211_local *local);
@@ -1901,6 +1933,7 @@ int ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 
 /* color change handling */
 void ieee80211_color_change_finalize_work(struct work_struct *work);
+void ieee80211_color_collision_detection_work(struct work_struct *work);
 
 /* interface handling */
 #define MAC80211_SUPPORTED_FEATURES_TX	(NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM | \
@@ -1929,9 +1962,6 @@ void ieee80211_sdata_stop(struct ieee80211_sub_if_data *sdata);
 int ieee80211_add_virtual_monitor(struct ieee80211_local *local);
 void ieee80211_del_virtual_monitor(struct ieee80211_local *local);
 
-int ieee80211_vif_set_links(struct ieee80211_sub_if_data *sdata,
-			    u16 new_links);
-
 bool __ieee80211_recalc_txpower(struct ieee80211_sub_if_data *sdata);
 void ieee80211_recalc_txpower(struct ieee80211_sub_if_data *sdata,
 			      bool update_bss);
@@ -1941,6 +1971,17 @@ static inline bool ieee80211_sdata_running(struct ieee80211_sub_if_data *sdata)
 {
 	return test_bit(SDATA_STATE_RUNNING, &sdata->state);
 }
+
+/* link handling */
+void ieee80211_link_setup(struct ieee80211_link_data *link);
+void ieee80211_link_init(struct ieee80211_sub_if_data *sdata,
+			 int link_id,
+			 struct ieee80211_link_data *link,
+			 struct ieee80211_bss_conf *link_conf);
+void ieee80211_link_stop(struct ieee80211_link_data *link);
+int ieee80211_vif_set_links(struct ieee80211_sub_if_data *sdata,
+			    u16 new_links);
+void ieee80211_vif_clear_links(struct ieee80211_sub_if_data *sdata);
 
 /* tx handling */
 void ieee80211_clear_tx_pending(struct ieee80211_local *local);
@@ -2183,7 +2224,13 @@ static inline void ieee80211_tx_skb(struct ieee80211_sub_if_data *sdata,
  *	represent a non-transmitting BSS in which case the data
  *	for that non-transmitting BSS is returned
  * @link_id: the link ID to parse elements for, if a STA profile
- *	is present in the multi-link element, or -1 to ignore
+ *	is present in the multi-link element, or -1 to ignore;
+ *	note that the code currently assumes parsing an association
+ *	(or re-association) response frame if this is given
+ * @from_ap: frame is received from an AP (currently used only
+ *	for EHT capabilities parsing)
+ * @scratch_len: if non zero, specifies the requested length of the scratch
+ *      buffer; otherwise, 'len' is used.
  */
 struct ieee80211_elems_parse_params {
 	const u8 *start;
@@ -2193,6 +2240,8 @@ struct ieee80211_elems_parse_params {
 	u32 crc;
 	struct cfg80211_bss *bss;
 	int link_id;
+	bool from_ap;
+	size_t scratch_len;
 };
 
 struct ieee802_11_elems *
@@ -2263,7 +2312,6 @@ void ieee80211_wake_queue_by_reason(struct ieee80211_hw *hw, int queue,
 void ieee80211_stop_queue_by_reason(struct ieee80211_hw *hw, int queue,
 				    enum queue_stop_reason reason,
 				    bool refcounted);
-void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue);
 void ieee80211_add_pending_skb(struct ieee80211_local *local,
 			       struct sk_buff *skb);
 void ieee80211_add_pending_skbs(struct ieee80211_local *local,
@@ -2382,6 +2430,7 @@ u8 *ieee80211_ie_build_he_cap(ieee80211_conn_flags_t disable_flags, u8 *pos,
 			      const struct ieee80211_sta_he_cap *he_cap,
 			      u8 *end);
 void ieee80211_ie_build_he_6ghz_cap(struct ieee80211_sub_if_data *sdata,
+				    enum ieee80211_smps_mode smps_mode,
 				    struct sk_buff *skb);
 u8 *ieee80211_ie_build_he_oper(u8 *pos, struct cfg80211_chan_def *chandef);
 int ieee80211_parse_bitrates(enum nl80211_chan_width width,
@@ -2407,8 +2456,7 @@ bool ieee80211_chandef_vht_oper(struct ieee80211_hw *hw, u32 vht_cap_info,
 				const struct ieee80211_vht_operation *oper,
 				const struct ieee80211_ht_operation *htop,
 				struct cfg80211_chan_def *chandef);
-void ieee80211_chandef_eht_oper(struct ieee80211_sub_if_data *sdata,
-				const struct ieee80211_eht_operation *eht_oper,
+void ieee80211_chandef_eht_oper(const struct ieee80211_eht_operation *eht_oper,
 				bool support_160, bool support_320,
 				struct cfg80211_chan_def *chandef);
 bool ieee80211_chandef_he_6ghz_oper(struct ieee80211_sub_if_data *sdata,
@@ -2435,7 +2483,7 @@ int ieee80211_link_unreserve_chanctx(struct ieee80211_link_data *link);
 int __must_check
 ieee80211_link_change_bandwidth(struct ieee80211_link_data *link,
 				const struct cfg80211_chan_def *chandef,
-				u32 *changed);
+				u64 *changed);
 void ieee80211_link_release_channel(struct ieee80211_link_data *link);
 void ieee80211_link_vlan_copy_chanctx(struct ieee80211_link_data *link);
 void ieee80211_link_copy_chanctx_to_vlans(struct ieee80211_link_data *link,
@@ -2513,7 +2561,8 @@ u8 ieee80211_ie_len_eht_cap(struct ieee80211_sub_if_data *sdata, u8 iftype);
 u8 *ieee80211_ie_build_eht_cap(u8 *pos,
 			       const struct ieee80211_sta_he_cap *he_cap,
 			       const struct ieee80211_sta_eht_cap *eht_cap,
-			       u8 *end);
+			       u8 *end,
+			       bool for_ap);
 
 void
 ieee80211_eht_cap_ie_to_sta_eht_cap(struct ieee80211_sub_if_data *sdata,

@@ -28,6 +28,7 @@
 #include "util/parse-events-hybrid.h"
 #include "util/pmu-hybrid.h"
 #include "tracepoint.h"
+#include "thread_map.h"
 
 #define MAX_NAME_LEN 100
 
@@ -149,13 +150,43 @@ struct event_symbol event_symbols_sw[PERF_COUNT_SW_MAX] = {
 	},
 };
 
-#define __PERF_EVENT_FIELD(config, name) \
-	((config & PERF_EVENT_##name##_MASK) >> PERF_EVENT_##name##_SHIFT)
+bool is_event_supported(u8 type, u64 config)
+{
+	bool ret = true;
+	int open_return;
+	struct evsel *evsel;
+	struct perf_event_attr attr = {
+		.type = type,
+		.config = config,
+		.disabled = 1,
+	};
+	struct perf_thread_map *tmap = thread_map__new_by_tid(0);
 
-#define PERF_EVENT_RAW(config)		__PERF_EVENT_FIELD(config, RAW)
-#define PERF_EVENT_CONFIG(config)	__PERF_EVENT_FIELD(config, CONFIG)
-#define PERF_EVENT_TYPE(config)		__PERF_EVENT_FIELD(config, TYPE)
-#define PERF_EVENT_ID(config)		__PERF_EVENT_FIELD(config, EVENT)
+	if (tmap == NULL)
+		return false;
+
+	evsel = evsel__new(&attr);
+	if (evsel) {
+		open_return = evsel__open(evsel, NULL, tmap);
+		ret = open_return >= 0;
+
+		if (open_return == -EACCES) {
+			/*
+			 * This happens if the paranoid value
+			 * /proc/sys/kernel/perf_event_paranoid is set to 2
+			 * Re-run with exclude_kernel set; we don't do that
+			 * by default as some ARM machines do not support it.
+			 *
+			 */
+			evsel->core.attr.exclude_kernel = 1;
+			ret = evsel__open(evsel, NULL, tmap) >= 0;
+		}
+		evsel__delete(evsel);
+	}
+
+	perf_thread_map__put(tmap);
+	return ret;
+}
 
 const char *event_type(int type)
 {
@@ -215,6 +246,9 @@ __add_event(struct list_head *list, int *idx,
 	struct perf_cpu_map *cpus = pmu ? perf_cpu_map__get(pmu->cpus) :
 			       cpu_list ? perf_cpu_map__new(cpu_list) : NULL;
 
+	if (pmu)
+		perf_pmu__warn_invalid_formats(pmu);
+
 	if (pmu && attr->type == PERF_TYPE_RAW)
 		perf_pmu__warn_invalid_config(pmu, attr->config, name);
 
@@ -232,6 +266,7 @@ __add_event(struct list_head *list, int *idx,
 	evsel->core.own_cpus = perf_cpu_map__get(cpus);
 	evsel->core.requires_cpu = pmu ? pmu->is_uncore : false;
 	evsel->auto_merge_stats = auto_merge_stats;
+	evsel->pmu = pmu;
 
 	if (name)
 		evsel->name = strdup(name);
@@ -410,6 +445,7 @@ out_free_terms:
 	return ret;
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static void tracepoint_error(struct parse_events_error *e, int err,
 			     const char *sys, const char *name)
 {
@@ -558,6 +594,7 @@ static int add_tracepoint_multi_sys(struct list_head *list, int *idx,
 	closedir(events_dir);
 	return ret;
 }
+#endif /* HAVE_LIBTRACEEVENT */
 
 #ifdef HAVE_LIBBPF_SUPPORT
 struct __add_bpf_event_param {
@@ -1108,6 +1145,7 @@ static int config_term_pmu(struct perf_event_attr *attr,
 		return config_term_common(attr, term, err);
 }
 
+#ifdef HAVE_LIBTRACEEVENT
 static int config_term_tracepoint(struct perf_event_attr *attr,
 				  struct parse_events_term *term,
 				  struct parse_events_error *err)
@@ -1135,6 +1173,7 @@ static int config_term_tracepoint(struct perf_event_attr *attr,
 
 	return 0;
 }
+#endif
 
 static int config_attr(struct perf_event_attr *attr,
 		       struct list_head *head,
@@ -1290,6 +1329,7 @@ int parse_events_add_tracepoint(struct list_head *list, int *idx,
 				struct parse_events_error *err,
 				struct list_head *head_config)
 {
+#ifdef HAVE_LIBTRACEEVENT
 	if (head_config) {
 		struct perf_event_attr attr;
 
@@ -1304,6 +1344,16 @@ int parse_events_add_tracepoint(struct list_head *list, int *idx,
 	else
 		return add_tracepoint_event(list, idx, sys, event,
 					    err, head_config);
+#else
+	(void)list;
+	(void)idx;
+	(void)sys;
+	(void)event;
+	(void)head_config;
+	parse_events_error__handle(err, 0, strdup("unsupported tracepoint"),
+				strdup("libtraceevent is necessary for tracepoint support"));
+	return -1;
+#endif
 }
 
 int parse_events_add_numeric(struct parse_events_state *parse_state,
@@ -1520,8 +1570,6 @@ int parse_events_add_pmu(struct parse_events_state *parse_state,
 	evsel->scale = info.scale;
 	evsel->per_pkg = info.per_pkg;
 	evsel->snapshot = info.snapshot;
-	evsel->metric_expr = info.metric_expr;
-	evsel->metric_name = info.metric_name;
 	return 0;
 }
 

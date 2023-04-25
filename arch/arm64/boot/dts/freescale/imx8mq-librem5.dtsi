@@ -7,6 +7,7 @@
 
 #include "dt-bindings/input/input.h"
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
 #include "dt-bindings/pwm/pwm.h"
 #include "dt-bindings/usb/pd.h"
 #include "imx8mq.dtsi"
@@ -51,6 +52,31 @@
 			linux,code = <KEY_VOLUMEUP>;
 			debounce-interval = <50>;
 			wakeup-source;
+		};
+	};
+
+	led-controller {
+		compatible = "pwm-leds-multicolor";
+
+		multi-led {
+			color = <LED_COLOR_ID_RGB>;
+			function = LED_FUNCTION_STATUS;
+			max-brightness = <248>;
+
+			led-0 {
+				color = <LED_COLOR_ID_BLUE>;
+				pwms = <&pwm2 0 50000 0>;
+			};
+
+			led-1 {
+				color = <LED_COLOR_ID_GREEN>;
+				pwms = <&pwm4 0 50000 0>;
+			};
+
+			led-2 {
+				color = <LED_COLOR_ID_RED>;
+				pwms = <&pwm3 0 50000 0>;
+			};
 		};
 	};
 
@@ -285,15 +311,15 @@
 	ddrc_opp_table: opp-table {
 		compatible = "operating-points-v2";
 
-		opp-25M {
+		opp-25000000 {
 			opp-hz = /bits/ 64 <25000000>;
 		};
 
-		opp-100M {
+		opp-100000000 {
 			opp-hz = /bits/ 64 <100000000>;
 		};
 
-		opp-800M {
+		opp-800000000 {
 			opp-hz = /bits/ 64 <800000000>;
 		};
 	};
@@ -747,6 +773,10 @@
 		interrupt-names = "irq";
 
 		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -1070,6 +1100,12 @@
 	pinctrl-0 = <&pinctrl_i2c4>;
 	status = "okay";
 
+	vcm@c {
+		compatible = "dongwoon,dw9714";
+		reg = <0x0c>;
+		vcc-supply = <&reg_csi_1v8>;
+	};
+
 	bat: fuel-gauge@36 {
 		compatible = "maxim,max17055";
 		reg = <0x36>;
@@ -1077,6 +1113,7 @@
 		interrupts = <20 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_gauge>;
+		power-supplies = <&bq25895>;
 		maxim,over-heat-temp = <700>;
 		maxim,over-volt = <4500>;
 		maxim,rsns-microohm = <5000>;
@@ -1106,8 +1143,6 @@
 };
 
 &mipi_csi1 {
-	#address-cells = <1>;
-	#size-cells = <0>;
 	status = "okay";
 
 	ports {
@@ -1265,6 +1300,7 @@
 	#size-cells = <0>;
 	dr_mode = "otg";
 	snps,dis_u3_susphy_quirk;
+	usb-role-switch;
 	status = "okay";
 
 	port@0 {

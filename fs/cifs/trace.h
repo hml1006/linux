@@ -372,6 +372,7 @@ DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(set_eof_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(set_info_compound_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(delete_enter);
 DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(mkdir_enter);
+DEFINE_SMB3_INF_COMPOUND_ENTER_EVENT(tdis_enter);
 
 
 DECLARE_EVENT_CLASS(smb3_inf_compound_done_class,
@@ -409,6 +410,7 @@ DEFINE_SMB3_INF_COMPOUND_DONE_EVENT(set_eof_done);
 DEFINE_SMB3_INF_COMPOUND_DONE_EVENT(set_info_compound_done);
 DEFINE_SMB3_INF_COMPOUND_DONE_EVENT(delete_done);
 DEFINE_SMB3_INF_COMPOUND_DONE_EVENT(mkdir_done);
+DEFINE_SMB3_INF_COMPOUND_DONE_EVENT(tdis_done);
 
 
 DECLARE_EVENT_CLASS(smb3_inf_compound_err_class,
@@ -451,6 +453,7 @@ DEFINE_SMB3_INF_COMPOUND_ERR_EVENT(set_eof_err);
 DEFINE_SMB3_INF_COMPOUND_ERR_EVENT(set_info_compound_err);
 DEFINE_SMB3_INF_COMPOUND_ERR_EVENT(mkdir_err);
 DEFINE_SMB3_INF_COMPOUND_ERR_EVENT(delete_err);
+DEFINE_SMB3_INF_COMPOUND_ERR_EVENT(tdis_err);
 
 /*
  * For logging SMB3 Status code and Command for responses which return errors
@@ -698,13 +701,15 @@ DECLARE_EVENT_CLASS(smb3_open_enter_class,
 	TP_PROTO(unsigned int xid,
 		__u32	tid,
 		__u64	sesid,
+		const char *full_path,
 		int	create_options,
 		int	desired_access),
-	TP_ARGS(xid, tid, sesid, create_options, desired_access),
+	TP_ARGS(xid, tid, sesid, full_path, create_options, desired_access),
 	TP_STRUCT__entry(
 		__field(unsigned int, xid)
 		__field(__u32, tid)
 		__field(__u64, sesid)
+		__string(path, full_path)
 		__field(int, create_options)
 		__field(int, desired_access)
 	),
@@ -712,11 +717,12 @@ DECLARE_EVENT_CLASS(smb3_open_enter_class,
 		__entry->xid = xid;
 		__entry->tid = tid;
 		__entry->sesid = sesid;
+		__assign_str(path, full_path);
 		__entry->create_options = create_options;
 		__entry->desired_access = desired_access;
 	),
-	TP_printk("xid=%u sid=0x%llx tid=0x%x cr_opts=0x%x des_access=0x%x",
-		__entry->xid, __entry->sesid, __entry->tid,
+	TP_printk("xid=%u sid=0x%llx tid=0x%x path=%s cr_opts=0x%x des_access=0x%x",
+		__entry->xid, __entry->sesid, __entry->tid, __get_str(path),
 		__entry->create_options, __entry->desired_access)
 )
 
@@ -725,9 +731,10 @@ DEFINE_EVENT(smb3_open_enter_class, smb3_##name,  \
 	TP_PROTO(unsigned int xid,		\
 		__u32	tid,			\
 		__u64	sesid,			\
+		const char *full_path,		\
 		int	create_options,		\
 		int	desired_access),	\
-	TP_ARGS(xid, tid, sesid, create_options, desired_access))
+	TP_ARGS(xid, tid, sesid, full_path, create_options, desired_access))
 
 DEFINE_SMB3_OPEN_ENTER_EVENT(open_enter);
 DEFINE_SMB3_OPEN_ENTER_EVENT(posix_mkdir_enter);

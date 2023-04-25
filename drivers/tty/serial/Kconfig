@@ -73,17 +73,17 @@ config SERIAL_AMBA_PL011_CONSOLE
 	  your boot loader (lilo or loadlin) about how to pass options to the
 	  kernel at boot time.)
 
-config SERIAL_EARLYCON_ARM_SEMIHOST
-	bool "Early console using ARM semihosting"
-	depends on ARM64 || ARM
+config SERIAL_EARLYCON_SEMIHOST
+	bool "Early console using Arm compatible semihosting"
+	depends on ARM64 || ARM || RISCV
 	select SERIAL_CORE
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
 	help
-	  Support for early debug console using ARM semihosting. This enables
-	  the console before standard serial driver is probed. This is enabled
-	  with "earlycon=smh" on the kernel command line. The console is
-	  enabled when early_param is processed.
+	  Support for early debug console using Arm compatible semihosting.
+	  This enables the console before standard serial driver is probed.
+	  This is enabled with "earlycon=smh" on the kernel command line.
+	  The console is enabled when early_param is processed.
 
 config SERIAL_EARLYCON_RISCV_SBI
 	bool "Early console using RISC-V SBI"
@@ -127,6 +127,7 @@ config SERIAL_SB1250_DUART_CONSOLE
 
 config SERIAL_ATMEL
 	bool "AT91 on-chip serial port support"
+	depends on COMMON_CLK
 	depends on ARCH_AT91 || COMPILE_TEST
 	select SERIAL_CORE
 	select SERIAL_MCTRL_GPIO if GPIOLIB
@@ -241,23 +242,23 @@ config SERIAL_SAMSUNG
 	select SERIAL_CORE
 	help
 	  Support for the on-chip UARTs on the Samsung
-	  S3C24xx/S3C64xx/S5Pv210/Exynos and Apple M1 SoCs, providing
+	  S3C64xx/S5Pv210/Exynos and Apple M1 SoCs, providing
 	  /dev/ttySAC0, 1 and 2 (note, some machines may not provide all of
 	  these ports, depending on how the serial port pins are configured.
+
 	  Choose Y/M here only if you build for such SoC.
 
 config SERIAL_SAMSUNG_UARTS_4
 	bool
 	depends on SERIAL_SAMSUNG
-	default y if !(CPU_S3C2410 || CPU_S3C2412 || CPU_S3C2440 || CPU_S3C2442)
+	default y
 	help
 	  Internal node for the common case of 4 Samsung compatible UARTs
 
 config SERIAL_SAMSUNG_UARTS
 	int
 	depends on SERIAL_SAMSUNG
-	default 4 if SERIAL_SAMSUNG_UARTS_4 || CPU_S3C2416
-	default 3
+	default 4
 	help
 	  Select the number of available UART ports for the Samsung S3C
 	  serial driver
@@ -427,7 +428,7 @@ config SERIAL_PXA
 
 config SERIAL_PXA_NON8250
 	bool
-	depends on !SERIAL_8250
+	depends on !SERIAL_8250 || COMPILE_TEST
 
 config SERIAL_PXA_CONSOLE
 	bool "Console on PXA serial port (DEPRECATED)"
@@ -601,21 +602,6 @@ config SERIAL_MUX_CONSOLE
 	depends on SERIAL_MUX=y
 	select SERIAL_CORE_CONSOLE
 	default y
-
-config PDC_CONSOLE
-	bool "PDC software console support"
-	depends on PARISC && !SERIAL_MUX && VT
-	help
-	  Saying Y here will enable the software based PDC console to be 
-	  used as the system console.  This is useful for machines in 
-	  which the hardware based console has not been written yet.  The
-	  following steps must be completed to use the PDC console:
-
-	    1. create the device entry (mknod /dev/ttyB0 c 11 0)
-	    2. Edit the /etc/inittab to start a getty listening on /dev/ttyB0
-	    3. Add device ttyB0 to /etc/securetty (if you want to log on as
-		 root on this console.)
-	    4. Change the kernel command console parameter to: console=ttyB0
 
 config SERIAL_SUNSAB
 	tristate "Sun Siemens SAB82532 serial support"
@@ -972,6 +958,7 @@ config SERIAL_OMAP_CONSOLE
 config SERIAL_SIFIVE
 	tristate "SiFive UART support"
 	depends on OF
+	default SOC_SIFIVE || SOC_CANAAN
 	select SERIAL_CORE
 	help
 	  Select this option if you are building a kernel for a device that
@@ -981,6 +968,7 @@ config SERIAL_SIFIVE
 config SERIAL_SIFIVE_CONSOLE
 	bool "Console on SiFive UART"
 	depends on SERIAL_SIFIVE=y
+	default SOC_SIFIVE || SOC_CANAAN
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
 	help
@@ -1083,8 +1071,8 @@ config SERIAL_TIMBERDALE
 config SERIAL_BCM63XX
 	tristate "Broadcom BCM63xx/BCM33xx UART support"
 	select SERIAL_CORE
-	depends on ARCH_BCM4908 || ARCH_BCMBCA || BCM63XX || BMIPS_GENERIC || COMPILE_TEST
-	default ARCH_BCM4908 || ARCH_BCMBCA || BCM63XX || BMIPS_GENERIC
+	depends on ARCH_BCMBCA || BCM63XX || BMIPS_GENERIC || COMPILE_TEST
+	default ARCH_BCMBCA || BCM63XX || BMIPS_GENERIC
 	help
 	  This enables the driver for the onchip UART core found on
 	  the following chipsets:
@@ -1519,7 +1507,7 @@ config SERIAL_MILBEAUT_USIO_CONSOLE
 config SERIAL_LITEUART
 	tristate "LiteUART serial port support"
 	depends on HAS_IOMEM
-	depends on OF || COMPILE_TEST
+	depends on OF
 	depends on LITEX || COMPILE_TEST
 	select SERIAL_CORE
 	help

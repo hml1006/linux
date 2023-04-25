@@ -308,7 +308,6 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 {
 	memcpy(new_ctx, ctx, sizeof(*ctx));
 	new_ctx->prepath = NULL;
-	new_ctx->mount_options = NULL;
 	new_ctx->nodename = NULL;
 	new_ctx->username = NULL;
 	new_ctx->password = NULL;
@@ -317,11 +316,11 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	new_ctx->UNC = NULL;
 	new_ctx->source = NULL;
 	new_ctx->iocharset = NULL;
+	new_ctx->leaf_fullpath = NULL;
 	/*
 	 * Make sure to stay in sync with smb3_cleanup_fs_context_contents()
 	 */
 	DUP_CTX_STR(prepath);
-	DUP_CTX_STR(mount_options);
 	DUP_CTX_STR(username);
 	DUP_CTX_STR(password);
 	DUP_CTX_STR(server_hostname);
@@ -330,6 +329,7 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	DUP_CTX_STR(domainname);
 	DUP_CTX_STR(nodename);
 	DUP_CTX_STR(iocharset);
+	DUP_CTX_STR(leaf_fullpath);
 
 	return 0;
 }
@@ -441,13 +441,14 @@ out:
  * but there are some bugs that prevent rename from working if there are
  * multiple delimiters.
  *
- * Returns a sanitized duplicate of @path. The caller is responsible for
- * cleaning up the original.
+ * Returns a sanitized duplicate of @path. @gfp indicates the GFP_* flags
+ * for kstrdup.
+ * The caller is responsible for freeing the original.
  */
 #define IS_DELIM(c) ((c) == '/' || (c) == '\\')
-static char *sanitize_path(char *path)
+char *cifs_sanitize_prepath(char *prepath, gfp_t gfp)
 {
-	char *cursor1 = path, *cursor2 = path;
+	char *cursor1 = prepath, *cursor2 = prepath;
 
 	/* skip all prepended delimiters */
 	while (IS_DELIM(*cursor1))
@@ -469,7 +470,7 @@ static char *sanitize_path(char *path)
 		cursor2--;
 
 	*(cursor2) = '\0';
-	return kstrdup(path, GFP_KERNEL);
+	return kstrdup(prepath, gfp);
 }
 
 /*
@@ -531,7 +532,7 @@ smb3_parse_devname(const char *devname, struct smb3_fs_context *ctx)
 	if (!*pos)
 		return 0;
 
-	ctx->prepath = sanitize_path(pos);
+	ctx->prepath = cifs_sanitize_prepath(pos, GFP_KERNEL);
 	if (!ctx->prepath)
 		return -ENOMEM;
 
@@ -569,16 +570,11 @@ static const struct fs_context_operations smb3_fs_context_ops = {
 static int smb3_fs_context_parse_monolithic(struct fs_context *fc,
 					   void *data)
 {
-	struct smb3_fs_context *ctx = smb3_fc2context(fc);
 	char *options = data, *key;
 	int ret = 0;
 
 	if (!options)
 		return 0;
-
-	ctx->mount_options = kstrdup(data, GFP_KERNEL);
-	if (ctx->mount_options == NULL)
-		return -ENOMEM;
 
 	ret = security_sb_eat_lsm_opts(options, &fc->security);
 	if (ret)
@@ -791,6 +787,13 @@ do {									\
 	cifs_sb->ctx->field = NULL;					\
 } while (0)
 
+#define STEAL_STRING_SENSITIVE(cifs_sb, ctx, field)			\
+do {									\
+	kfree_sensitive(ctx->field);					\
+	ctx->field = cifs_sb->ctx->field;				\
+	cifs_sb->ctx->field = NULL;					\
+} while (0)
+
 static int smb3_reconfigure(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
@@ -811,7 +814,7 @@ static int smb3_reconfigure(struct fs_context *fc)
 	STEAL_STRING(cifs_sb, ctx, UNC);
 	STEAL_STRING(cifs_sb, ctx, source);
 	STEAL_STRING(cifs_sb, ctx, username);
-	STEAL_STRING(cifs_sb, ctx, password);
+	STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
 	STEAL_STRING(cifs_sb, ctx, domainname);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
@@ -877,16 +880,21 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		ctx->nodfs = 1;
 		break;
 	case Opt_hard:
-		if (result.negated)
+		if (result.negated) {
+			if (ctx->retry == 1)
+				cifs_dbg(VFS, "conflicting hard vs. soft mount options\n");
 			ctx->retry = 0;
-		else
+		} else
 			ctx->retry = 1;
 		break;
 	case Opt_soft:
 		if (result.negated)
 			ctx->retry = 1;
-		else
+		else {
+			if (ctx->retry == 1)
+				cifs_dbg(VFS, "conflicting hard vs soft mount options\n");
 			ctx->retry = 0;
+		}
 		break;
 	case Opt_mapposix:
 		if (result.negated)
@@ -1162,7 +1170,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		}
 		break;
 	case Opt_pass:
-		kfree(ctx->password);
+		kfree_sensitive(ctx->password);
 		ctx->password = NULL;
 		if (strlen(param->string) == 0)
 			break;
@@ -1470,6 +1478,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	return 0;
 
  cifs_parse_mount_err:
+	kfree_sensitive(ctx->password);
 	return -EINVAL;
 }
 
@@ -1568,8 +1577,6 @@ smb3_cleanup_fs_context_contents(struct smb3_fs_context *ctx)
 	/*
 	 * Make sure this stays in sync with smb3_fs_context_dup()
 	 */
-	kfree(ctx->mount_options);
-	ctx->mount_options = NULL;
 	kfree(ctx->username);
 	ctx->username = NULL;
 	kfree_sensitive(ctx->password);
@@ -1588,6 +1595,8 @@ smb3_cleanup_fs_context_contents(struct smb3_fs_context *ctx)
 	ctx->iocharset = NULL;
 	kfree(ctx->prepath);
 	ctx->prepath = NULL;
+	kfree(ctx->leaf_fullpath);
+	ctx->leaf_fullpath = NULL;
 }
 
 void

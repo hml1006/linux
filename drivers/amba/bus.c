@@ -209,6 +209,7 @@ static int amba_match(struct device *dev, struct device_driver *drv)
 	struct amba_device *pcdev = to_amba_device(dev);
 	struct amba_driver *pcdrv = to_amba_driver(drv);
 
+	mutex_lock(&pcdev->periphid_lock);
 	if (!pcdev->periphid) {
 		int ret = amba_read_periphid(pcdev);
 
@@ -218,11 +219,14 @@ static int amba_match(struct device *dev, struct device_driver *drv)
 		 * permanent failure in reading pid and cid, simply map it to
 		 * -EPROBE_DEFER.
 		 */
-		if (ret)
+		if (ret) {
+			mutex_unlock(&pcdev->periphid_lock);
 			return -EPROBE_DEFER;
+		}
 		dev_set_uevent_suppress(dev, false);
 		kobject_uevent(&dev->kobj, KOBJ_ADD);
 	}
+	mutex_unlock(&pcdev->periphid_lock);
 
 	/* When driver_override is set, only bind to the matching driver */
 	if (pcdev->driver_override)
@@ -231,9 +235,9 @@ static int amba_match(struct device *dev, struct device_driver *drv)
 	return amba_lookup(pcdrv->id_table, pcdev) != NULL;
 }
 
-static int amba_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int amba_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct amba_device *pcdev = to_amba_device(dev);
+	const struct amba_device *pcdev = to_amba_device(dev);
 	int retval = 0;
 
 	retval = add_uevent_var(env, "AMBA_ID=%08x", pcdev->periphid);
@@ -417,12 +421,6 @@ static int amba_pm_runtime_resume(struct device *dev)
 #endif /* CONFIG_PM */
 
 static const struct dev_pm_ops amba_pm = {
-	.suspend	= pm_generic_suspend,
-	.resume		= pm_generic_resume,
-	.freeze		= pm_generic_freeze,
-	.thaw		= pm_generic_thaw,
-	.poweroff	= pm_generic_poweroff,
-	.restore	= pm_generic_restore,
 	SET_RUNTIME_PM_OPS(
 		amba_pm_runtime_suspend,
 		amba_pm_runtime_resume,
@@ -532,6 +530,7 @@ static void amba_device_release(struct device *dev)
 
 	if (d->res.parent)
 		release_resource(&d->res);
+	mutex_destroy(&d->periphid_lock);
 	kfree(d);
 }
 
@@ -584,6 +583,7 @@ static void amba_device_initialize(struct amba_device *dev, const char *name)
 	dev->dev.dma_mask = &dev->dev.coherent_dma_mask;
 	dev->dev.dma_parms = &dev->dma_parms;
 	dev->res.name = dev_name(&dev->dev);
+	mutex_init(&dev->periphid_lock);
 }
 
 /**

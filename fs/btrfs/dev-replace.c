@@ -18,11 +18,13 @@
 #include "volumes.h"
 #include "async-thread.h"
 #include "check-integrity.h"
-#include "rcu-string.h"
 #include "dev-replace.h"
 #include "sysfs.h"
 #include "zoned.h"
 #include "block-group.h"
+#include "fs.h"
+#include "accessors.h"
+#include "scrub.h"
 
 /*
  * Device replace overview
@@ -246,7 +248,6 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
 	struct block_device *bdev;
-	struct rcu_string *name;
 	u64 devid = BTRFS_DEV_REPLACE_DEVID;
 	int ret = 0;
 
@@ -290,19 +291,12 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	}
 
 
-	device = btrfs_alloc_device(NULL, &devid, NULL);
+	device = btrfs_alloc_device(NULL, &devid, NULL, device_path);
 	if (IS_ERR(device)) {
 		ret = PTR_ERR(device);
 		goto error;
 	}
 
-	name = rcu_string_strdup(device_path, GFP_KERNEL);
-	if (!name) {
-		btrfs_free_device(device);
-		ret = -ENOMEM;
-		goto error;
-	}
-	rcu_assign_pointer(device->name, name);
 	ret = lookup_bdev(device_path, &device->devt);
 	if (ret)
 		goto error;
@@ -456,14 +450,6 @@ out:
 	return ret;
 }
 
-static char* btrfs_dev_name(struct btrfs_device *device)
-{
-	if (!device || test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state))
-		return "<missing disk>";
-	else
-		return rcu_str_deref(device->name);
-}
-
 static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 				    struct btrfs_device *src_dev)
 {
@@ -545,10 +531,7 @@ static int mark_block_group_to_copy(struct btrfs_fs_info *fs_info,
 		if (!cache)
 			continue;
 
-		spin_lock(&cache->lock);
-		cache->to_copy = 1;
-		spin_unlock(&cache->lock);
-
+		set_bit(BLOCK_GROUP_FLAG_TO_COPY, &cache->runtime_flags);
 		btrfs_put_block_group(cache);
 	}
 	if (iter_ret < 0)
@@ -577,7 +560,7 @@ bool btrfs_finish_block_group_to_copy(struct btrfs_device *srcdev,
 		return true;
 
 	spin_lock(&cache->lock);
-	if (cache->removed) {
+	if (test_bit(BLOCK_GROUP_FLAG_REMOVED, &cache->runtime_flags)) {
 		spin_unlock(&cache->lock);
 		return true;
 	}
@@ -610,9 +593,7 @@ bool btrfs_finish_block_group_to_copy(struct btrfs_device *srcdev,
 	}
 
 	/* Last stripe on this device */
-	spin_lock(&cache->lock);
-	cache->to_copy = 0;
-	spin_unlock(&cache->lock);
+	clear_bit(BLOCK_GROUP_FLAG_TO_COPY, &cache->runtime_flags);
 
 	return true;
 }
@@ -684,7 +665,7 @@ static int btrfs_dev_replace_start(struct btrfs_fs_info *fs_info,
 		      "dev_replace from %s (devid %llu) to %s started",
 		      btrfs_dev_name(src_device),
 		      src_device->devid,
-		      rcu_str_deref(tgt_device->name));
+		      btrfs_dev_name(tgt_device));
 
 	/*
 	 * from now on, the writes to the srcdev are all duplicated to
@@ -943,7 +924,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 				 "btrfs_scrub_dev(%s, %llu, %s) failed %d",
 				 btrfs_dev_name(src_device),
 				 src_device->devid,
-				 rcu_str_deref(tgt_device->name), scrub_ret);
+				 btrfs_dev_name(tgt_device), scrub_ret);
 error:
 		up_write(&dev_replace->rwsem);
 		mutex_unlock(&fs_info->chunk_mutex);
@@ -961,7 +942,7 @@ error:
 			  "dev_replace from %s (devid %llu) to %s finished",
 			  btrfs_dev_name(src_device),
 			  src_device->devid,
-			  rcu_str_deref(tgt_device->name));
+			  btrfs_dev_name(tgt_device));
 	clear_bit(BTRFS_DEV_STATE_REPLACE_TGT, &tgt_device->dev_state);
 	tgt_device->devid = src_device->devid;
 	src_device->devid = BTRFS_DEV_REPLACE_DEVID;
@@ -1286,11 +1267,6 @@ int __pure btrfs_dev_replace_is_ongoing(struct btrfs_dev_replace *dev_replace)
 		break;
 	}
 	return 1;
-}
-
-void btrfs_bio_counter_inc_noblocked(struct btrfs_fs_info *fs_info)
-{
-	percpu_counter_inc(&fs_info->dev_replace.bio_counter);
 }
 
 void btrfs_bio_counter_sub(struct btrfs_fs_info *fs_info, s64 amount)

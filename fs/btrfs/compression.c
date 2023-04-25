@@ -8,6 +8,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/pagevec.h>
 #include <linux/highmem.h>
 #include <linux/kthread.h>
 #include <linux/time.h>
@@ -15,22 +16,26 @@
 #include <linux/string.h>
 #include <linux/backing-dev.h>
 #include <linux/writeback.h>
+#include <linux/psi.h>
 #include <linux/slab.h>
 #include <linux/sched/mm.h>
 #include <linux/log2.h>
 #include <crypto/hash.h>
 #include "misc.h"
 #include "ctree.h"
+#include "fs.h"
 #include "disk-io.h"
 #include "transaction.h"
 #include "btrfs_inode.h"
-#include "volumes.h"
+#include "bio.h"
 #include "ordered-data.h"
 #include "compression.h"
 #include "extent_io.h"
 #include "extent_map.h"
 #include "subpage.h"
 #include "zoned.h"
+#include "file-item.h"
+#include "super.h"
 
 static const char* const btrfs_compress_types[] = { "", "zlib", "lzo", "zstd" };
 
@@ -114,7 +119,7 @@ static int compression_decompress_bio(struct list_head *ws,
 }
 
 static int compression_decompress(int type, struct list_head *ws,
-               unsigned char *data_in, struct page *dest_page,
+               const u8 *data_in, struct page *dest_page,
                unsigned long start_byte, size_t srclen, size_t destlen)
 {
 	switch (type) {
@@ -136,12 +141,15 @@ static int compression_decompress(int type, struct list_head *ws,
 
 static int btrfs_decompress_bio(struct compressed_bio *cb);
 
-static void finish_compressed_bio_read(struct compressed_bio *cb)
+static void end_compressed_bio_read(struct btrfs_bio *bbio)
 {
+	struct compressed_bio *cb = bbio->private;
 	unsigned int index;
 	struct page *page;
 
-	if (cb->status == BLK_STS_OK)
+	if (bbio->bio.bi_status)
+		cb->status = bbio->bio.bi_status;
+	else
 		cb->status = errno_to_blk_status(btrfs_decompress_bio(cb));
 
 	/* Release the compressed pages */
@@ -152,64 +160,12 @@ static void finish_compressed_bio_read(struct compressed_bio *cb)
 	}
 
 	/* Do io completion on the original bio */
-	if (cb->status != BLK_STS_OK)
-		cb->orig_bio->bi_status = cb->status;
-	bio_endio(cb->orig_bio);
+	btrfs_bio_end_io(btrfs_bio(cb->orig_bio), cb->status);
 
 	/* Finally free the cb struct */
 	kfree(cb->compressed_pages);
 	kfree(cb);
-}
-
-/*
- * Verify the checksums and kick off repair if needed on the uncompressed data
- * before decompressing it into the original bio and freeing the uncompressed
- * pages.
- */
-static void end_compressed_bio_read(struct bio *bio)
-{
-	struct compressed_bio *cb = bio->bi_private;
-	struct inode *inode = cb->inode;
-	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
-	struct btrfs_inode *bi = BTRFS_I(inode);
-	bool csum = !(bi->flags & BTRFS_INODE_NODATASUM) &&
-		    !test_bit(BTRFS_FS_STATE_NO_CSUMS, &fs_info->fs_state);
-	blk_status_t status = bio->bi_status;
-	struct btrfs_bio *bbio = btrfs_bio(bio);
-	struct bvec_iter iter;
-	struct bio_vec bv;
-	u32 offset;
-
-	btrfs_bio_for_each_sector(fs_info, bv, bbio, iter, offset) {
-		u64 start = bbio->file_offset + offset;
-
-		if (!status &&
-		    (!csum || !btrfs_check_data_csum(inode, bbio, offset,
-						     bv.bv_page, bv.bv_offset))) {
-			clean_io_failure(fs_info, &bi->io_failure_tree,
-					 &bi->io_tree, start, bv.bv_page,
-					 btrfs_ino(bi), bv.bv_offset);
-		} else {
-			int ret;
-
-			refcount_inc(&cb->pending_ios);
-			ret = btrfs_repair_one_sector(inode, bbio, offset,
-						      bv.bv_page, bv.bv_offset,
-						      btrfs_submit_data_read_bio);
-			if (ret) {
-				refcount_dec(&cb->pending_ios);
-				status = errno_to_blk_status(ret);
-			}
-		}
-	}
-
-	if (status)
-		cb->status = status;
-
-	if (refcount_dec_and_test(&cb->pending_ios))
-		finish_compressed_bio_read(cb);
-	btrfs_bio_free_csum(bbio);
-	bio_put(bio);
+	bio_put(&bbio->bio);
 }
 
 /*
@@ -222,8 +178,7 @@ static noinline void end_compressed_writeback(struct inode *inode,
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	unsigned long index = cb->start >> PAGE_SHIFT;
 	unsigned long end_index = (cb->start + cb->len - 1) >> PAGE_SHIFT;
-	struct page *pages[16];
-	unsigned long nr_pages = end_index - index + 1;
+	struct folio_batch fbatch;
 	const int errno = blk_status_to_errno(cb->status);
 	int i;
 	int ret;
@@ -231,24 +186,23 @@ static noinline void end_compressed_writeback(struct inode *inode,
 	if (errno)
 		mapping_set_error(inode->i_mapping, errno);
 
-	while (nr_pages > 0) {
-		ret = find_get_pages_contig(inode->i_mapping, index,
-				     min_t(unsigned long,
-				     nr_pages, ARRAY_SIZE(pages)), pages);
-		if (ret == 0) {
-			nr_pages -= 1;
-			index += 1;
-			continue;
-		}
+	folio_batch_init(&fbatch);
+	while (index <= end_index) {
+		ret = filemap_get_folios(inode->i_mapping, &index, end_index,
+				&fbatch);
+
+		if (ret == 0)
+			return;
+
 		for (i = 0; i < ret; i++) {
+			struct folio *folio = fbatch.folios[i];
+
 			if (errno)
-				SetPageError(pages[i]);
-			btrfs_page_clamp_clear_writeback(fs_info, pages[i],
+				folio_set_error(folio);
+			btrfs_page_clamp_clear_writeback(fs_info, &folio->page,
 							 cb->start, cb->len);
-			put_page(pages[i]);
 		}
-		nr_pages -= ret;
-		index += ret;
+		folio_batch_release(&fbatch);
 	}
 	/* the inode may be gone now */
 }
@@ -301,74 +255,15 @@ static void btrfs_finish_compressed_write_work(struct work_struct *work)
  * This also calls the writeback end hooks for the file pages so that metadata
  * and checksums can be updated in the file.
  */
-static void end_compressed_bio_write(struct bio *bio)
+static void end_compressed_bio_write(struct btrfs_bio *bbio)
 {
-	struct compressed_bio *cb = bio->bi_private;
-
-	if (bio->bi_status)
-		cb->status = bio->bi_status;
-
-	if (refcount_dec_and_test(&cb->pending_ios)) {
-		struct btrfs_fs_info *fs_info = btrfs_sb(cb->inode->i_sb);
-
-		btrfs_record_physical_zoned(cb->inode, cb->start, bio);
-		queue_work(fs_info->compressed_write_workers, &cb->write_end_work);
-	}
-	bio_put(bio);
-}
-
-/*
- * Allocate a compressed_bio, which will be used to read/write on-disk
- * (aka, compressed) * data.
- *
- * @cb:                 The compressed_bio structure, which records all the needed
- *                      information to bind the compressed data to the uncompressed
- *                      page cache.
- * @disk_byten:         The logical bytenr where the compressed data will be read
- *                      from or written to.
- * @endio_func:         The endio function to call after the IO for compressed data
- *                      is finished.
- * @next_stripe_start:  Return value of logical bytenr of where next stripe starts.
- *                      Let the caller know to only fill the bio up to the stripe
- *                      boundary.
- */
-
-
-static struct bio *alloc_compressed_bio(struct compressed_bio *cb, u64 disk_bytenr,
-					blk_opf_t opf, bio_end_io_t endio_func,
-					u64 *next_stripe_start)
-{
+	struct compressed_bio *cb = bbio->private;
 	struct btrfs_fs_info *fs_info = btrfs_sb(cb->inode->i_sb);
-	struct btrfs_io_geometry geom;
-	struct extent_map *em;
-	struct bio *bio;
-	int ret;
 
-	bio = btrfs_bio_alloc(BIO_MAX_VECS);
+	cb->status = bbio->bio.bi_status;
+	queue_work(fs_info->compressed_write_workers, &cb->write_end_work);
 
-	bio->bi_iter.bi_sector = disk_bytenr >> SECTOR_SHIFT;
-	bio->bi_opf = opf;
-	bio->bi_private = cb;
-	bio->bi_end_io = endio_func;
-
-	em = btrfs_get_chunk_map(fs_info, disk_bytenr, fs_info->sectorsize);
-	if (IS_ERR(em)) {
-		bio_put(bio);
-		return ERR_CAST(em);
-	}
-
-	if (bio_op(bio) == REQ_OP_ZONE_APPEND)
-		bio_set_dev(bio, em->map_lookup->stripes[0].dev->bdev);
-
-	ret = btrfs_get_io_geometry(fs_info, em, btrfs_op(bio), disk_bytenr, &geom);
-	free_extent_map(em);
-	if (ret < 0) {
-		bio_put(bio);
-		return ERR_PTR(ret);
-	}
-	*next_stripe_start = disk_bytenr + geom.len;
-	refcount_inc(&cb->pending_ios);
-	return bio;
+	bio_put(&bbio->bio);
 }
 
 /*
@@ -393,18 +288,13 @@ blk_status_t btrfs_submit_compressed_write(struct btrfs_inode *inode, u64 start,
 	struct bio *bio = NULL;
 	struct compressed_bio *cb;
 	u64 cur_disk_bytenr = disk_start;
-	u64 next_stripe_start;
 	blk_status_t ret = BLK_STS_OK;
-	int skip_sum = inode->flags & BTRFS_INODE_NODATASUM;
-	const bool use_append = btrfs_use_zone_append(inode, disk_start);
-	const enum req_op bio_op = use_append ? REQ_OP_ZONE_APPEND : REQ_OP_WRITE;
 
 	ASSERT(IS_ALIGNED(start, fs_info->sectorsize) &&
 	       IS_ALIGNED(len, fs_info->sectorsize));
 	cb = kmalloc(sizeof(struct compressed_bio), GFP_NOFS);
 	if (!cb)
 		return BLK_STS_RESOURCE;
-	refcount_set(&cb->pending_ios, 1);
 	cb->status = BLK_STS_OK;
 	cb->inode = &inode->vfs_inode;
 	cb->start = start;
@@ -415,8 +305,16 @@ blk_status_t btrfs_submit_compressed_write(struct btrfs_inode *inode, u64 start,
 	INIT_WORK(&cb->write_end_work, btrfs_finish_compressed_write_work);
 	cb->nr_pages = nr_pages;
 
-	if (blkcg_css)
+	if (blkcg_css) {
 		kthread_associate_blkcg(blkcg_css);
+		write_flags |= REQ_CGROUP_PUNT;
+	}
+
+	write_flags |= REQ_BTRFS_ONE_ORDERED;
+	bio = btrfs_bio_alloc(BIO_MAX_VECS, REQ_OP_WRITE | write_flags,
+			      BTRFS_I(cb->inode), end_compressed_bio_write, cb);
+	bio->bi_iter.bi_sector = cur_disk_bytenr >> SECTOR_SHIFT;
+	btrfs_bio(bio)->file_offset = start;
 
 	while (cur_disk_bytenr < disk_start + compressed_len) {
 		u64 offset = cur_disk_bytenr - disk_start;
@@ -424,78 +322,30 @@ blk_status_t btrfs_submit_compressed_write(struct btrfs_inode *inode, u64 start,
 		unsigned int real_size;
 		unsigned int added;
 		struct page *page = compressed_pages[index];
-		bool submit = false;
-
-		/* Allocate new bio if submitted or not yet allocated */
-		if (!bio) {
-			bio = alloc_compressed_bio(cb, cur_disk_bytenr,
-				bio_op | write_flags, end_compressed_bio_write,
-				&next_stripe_start);
-			if (IS_ERR(bio)) {
-				ret = errno_to_blk_status(PTR_ERR(bio));
-				break;
-			}
-			if (blkcg_css)
-				bio->bi_opf |= REQ_CGROUP_PUNT;
-		}
-		/*
-		 * We should never reach next_stripe_start start as we will
-		 * submit comp_bio when reach the boundary immediately.
-		 */
-		ASSERT(cur_disk_bytenr != next_stripe_start);
 
 		/*
 		 * We have various limits on the real read size:
-		 * - stripe boundary
 		 * - page boundary
 		 * - compressed length boundary
 		 */
-		real_size = min_t(u64, U32_MAX, next_stripe_start - cur_disk_bytenr);
-		real_size = min_t(u64, real_size, PAGE_SIZE - offset_in_page(offset));
+		real_size = min_t(u64, U32_MAX, PAGE_SIZE - offset_in_page(offset));
 		real_size = min_t(u64, real_size, compressed_len - offset);
 		ASSERT(IS_ALIGNED(real_size, fs_info->sectorsize));
 
-		if (use_append)
-			added = bio_add_zone_append_page(bio, page, real_size,
-					offset_in_page(offset));
-		else
-			added = bio_add_page(bio, page, real_size,
-					offset_in_page(offset));
-		/* Reached zoned boundary */
-		if (added == 0)
-			submit = true;
-
+		added = bio_add_page(bio, page, real_size, offset_in_page(offset));
+		/*
+		 * Maximum compressed extent is smaller than bio size limit,
+		 * thus bio_add_page() should always success.
+		 */
+		ASSERT(added == real_size);
 		cur_disk_bytenr += added;
-		/* Reached stripe boundary */
-		if (cur_disk_bytenr == next_stripe_start)
-			submit = true;
-
-		/* Finished the range */
-		if (cur_disk_bytenr == disk_start + compressed_len)
-			submit = true;
-
-		if (submit) {
-			if (!skip_sum) {
-				ret = btrfs_csum_one_bio(inode, bio, start, true);
-				if (ret) {
-					bio->bi_status = ret;
-					bio_endio(bio);
-					break;
-				}
-			}
-
-			ASSERT(bio->bi_iter.bi_size);
-			btrfs_submit_bio(fs_info, bio, 0);
-			bio = NULL;
-		}
-		cond_resched();
 	}
 
+	/* Finished the range. */
+	ASSERT(bio->bi_iter.bi_size);
+	btrfs_submit_bio(bio, 0);
 	if (blkcg_css)
 		kthread_associate_blkcg(NULL);
-
-	if (refcount_dec_and_test(&cb->pending_ios))
-		finish_compressed_bio_write(cb);
 	return ret;
 }
 
@@ -519,7 +369,8 @@ static u64 bio_end_offset(struct bio *bio)
  */
 static noinline int add_ra_bio_pages(struct inode *inode,
 				     u64 compressed_end,
-				     struct compressed_bio *cb)
+				     struct compressed_bio *cb,
+				     int *memstall, unsigned long *pflags)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	unsigned long end_index;
@@ -588,6 +439,11 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 			continue;
 		}
 
+		if (!*memstall && PageWorkingset(page)) {
+			psi_memstall_enter(pflags);
+			*memstall = 1;
+		}
+
 		ret = set_page_extent_mapped(page);
 		if (ret < 0) {
 			unlock_page(page);
@@ -596,7 +452,7 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		}
 
 		page_end = (pg_index << PAGE_SHIFT) + PAGE_SIZE - 1;
-		lock_extent(tree, cur, page_end);
+		lock_extent(tree, cur, page_end, NULL);
 		read_lock(&em_tree->lock);
 		em = lookup_extent_mapping(em_tree, cur, page_end + 1 - cur);
 		read_unlock(&em_tree->lock);
@@ -610,7 +466,7 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		    (cur + fs_info->sectorsize > extent_map_end(em)) ||
 		    (em->block_start >> 9) != cb->orig_bio->bi_iter.bi_sector) {
 			free_extent_map(em);
-			unlock_extent(tree, cur, page_end);
+			unlock_extent(tree, cur, page_end, NULL);
 			unlock_page(page);
 			put_page(page);
 			break;
@@ -630,7 +486,7 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		add_size = min(em->start + em->len, page_end + 1) - cur;
 		ret = bio_add_page(cb->orig_bio, page, add_size, offset_in_page(cur));
 		if (ret != add_size) {
-			unlock_extent(tree, cur, page_end);
+			unlock_extent(tree, cur, page_end, NULL);
 			unlock_page(page);
 			put_page(page);
 			break;
@@ -666,14 +522,15 @@ void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 	struct extent_map_tree *em_tree;
 	struct compressed_bio *cb;
 	unsigned int compressed_len;
-	struct bio *comp_bio = NULL;
+	struct bio *comp_bio;
 	const u64 disk_bytenr = bio->bi_iter.bi_sector << SECTOR_SHIFT;
 	u64 cur_disk_byte = disk_bytenr;
-	u64 next_stripe_start;
 	u64 file_offset;
 	u64 em_len;
 	u64 em_start;
 	struct extent_map *em;
+	unsigned long pflags;
+	int memstall = 0;
 	blk_status_t ret;
 	int ret2;
 	int i;
@@ -700,7 +557,6 @@ void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 		goto out;
 	}
 
-	refcount_set(&cb->pending_ios, 1);
 	cb->status = BLK_STS_OK;
 	cb->inode = inode;
 
@@ -729,10 +585,14 @@ void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 		goto fail;
 	}
 
-	add_ra_bio_pages(inode, em_start + em_len, cb);
+	add_ra_bio_pages(inode, em_start + em_len, cb, &memstall, &pflags);
 
 	/* include any pages we added in add_ra-bio_pages */
 	cb->len = bio->bi_iter.bi_size;
+
+	comp_bio = btrfs_bio_alloc(BIO_MAX_VECS, REQ_OP_READ, BTRFS_I(cb->inode),
+				   end_compressed_bio_read, cb);
+	comp_bio->bi_iter.bi_sector = (cur_disk_byte >> SECTOR_SHIFT);
 
 	while (cur_disk_byte < disk_bytenr + compressed_len) {
 		u64 offset = cur_disk_byte - disk_bytenr;
@@ -740,31 +600,13 @@ void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 		unsigned int real_size;
 		unsigned int added;
 		struct page *page = cb->compressed_pages[index];
-		bool submit = false;
 
-		/* Allocate new bio if submitted or not yet allocated */
-		if (!comp_bio) {
-			comp_bio = alloc_compressed_bio(cb, cur_disk_byte,
-					REQ_OP_READ, end_compressed_bio_read,
-					&next_stripe_start);
-			if (IS_ERR(comp_bio)) {
-				cb->status = errno_to_blk_status(PTR_ERR(comp_bio));
-				break;
-			}
-		}
-		/*
-		 * We should never reach next_stripe_start start as we will
-		 * submit comp_bio when reach the boundary immediately.
-		 */
-		ASSERT(cur_disk_byte != next_stripe_start);
 		/*
 		 * We have various limit on the real read size:
-		 * - stripe boundary
 		 * - page boundary
 		 * - compressed length boundary
 		 */
-		real_size = min_t(u64, U32_MAX, next_stripe_start - cur_disk_byte);
-		real_size = min_t(u64, real_size, PAGE_SIZE - offset_in_page(offset));
+		real_size = min_t(u64, U32_MAX, PAGE_SIZE - offset_in_page(offset));
 		real_size = min_t(u64, real_size, compressed_len - offset);
 		ASSERT(IS_ALIGNED(real_size, fs_info->sectorsize));
 
@@ -775,43 +617,20 @@ void btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 		 */
 		ASSERT(added == real_size);
 		cur_disk_byte += added;
-
-		/* Reached stripe boundary, need to submit */
-		if (cur_disk_byte == next_stripe_start)
-			submit = true;
-
-		/* Has finished the range, need to submit */
-		if (cur_disk_byte == disk_bytenr + compressed_len)
-			submit = true;
-
-		if (submit) {
-			/* Save the original iter for read repair */
-			if (bio_op(comp_bio) == REQ_OP_READ)
-				btrfs_bio(comp_bio)->iter = comp_bio->bi_iter;
-
-			/*
-			 * Save the initial offset of this chunk, as there
-			 * is no direct correlation between compressed pages and
-			 * the original file offset.  The field is only used for
-			 * priting error messages.
-			 */
-			btrfs_bio(comp_bio)->file_offset = file_offset;
-
-			ret = btrfs_lookup_bio_sums(inode, comp_bio, NULL);
-			if (ret) {
-				comp_bio->bi_status = ret;
-				bio_endio(comp_bio);
-				break;
-			}
-
-			ASSERT(comp_bio->bi_iter.bi_size);
-			btrfs_submit_bio(fs_info, comp_bio, mirror_num);
-			comp_bio = NULL;
-		}
 	}
 
-	if (refcount_dec_and_test(&cb->pending_ios))
-		finish_compressed_bio_read(cb);
+	if (memstall)
+		psi_memstall_leave(&pflags);
+
+	/*
+	 * Stash the initial offset of this chunk, as there is no direct
+	 * correlation between compressed pages and the original file offset.
+	 * The field is only used for printing error messages anyway.
+	 */
+	btrfs_bio(comp_bio)->file_offset = file_offset;
+
+	ASSERT(comp_bio->bi_iter.bi_size);
+	btrfs_submit_bio(comp_bio, mirror_num);
 	return;
 
 fail:
@@ -826,8 +645,7 @@ fail:
 	kfree(cb);
 out:
 	free_extent_map(em);
-	bio->bi_status = ret;
-	bio_endio(bio);
+	btrfs_bio_end_io(btrfs_bio(bio), ret);
 	return;
 }
 
@@ -1228,7 +1046,7 @@ static int btrfs_decompress_bio(struct compressed_bio *cb)
  * single page, and we want to read a single page out of it.
  * start_byte tells us the offset into the compressed data we're interested in
  */
-int btrfs_decompress(int type, unsigned char *data_in, struct page *dest_page,
+int btrfs_decompress(int type, const u8 *data_in, struct page *dest_page,
 		     unsigned long start_byte, size_t srclen, size_t destlen)
 {
 	struct list_head *workspace;
@@ -1242,12 +1060,13 @@ int btrfs_decompress(int type, unsigned char *data_in, struct page *dest_page,
 	return ret;
 }
 
-void __init btrfs_init_compress(void)
+int __init btrfs_init_compress(void)
 {
 	btrfs_init_workspace_manager(BTRFS_COMPRESS_NONE);
 	btrfs_init_workspace_manager(BTRFS_COMPRESS_ZLIB);
 	btrfs_init_workspace_manager(BTRFS_COMPRESS_LZO);
 	zstd_init_workspace_manager();
+	return 0;
 }
 
 void __cold btrfs_exit_compress(void)
@@ -1604,7 +1423,7 @@ static void heuristic_collect_sample(struct inode *inode, u64 start, u64 end,
 	index_end = end >> PAGE_SHIFT;
 
 	/* Don't miss unaligned end */
-	if (!IS_ALIGNED(end, PAGE_SIZE))
+	if (!PAGE_ALIGNED(end))
 		index_end++;
 
 	curr_sample_pos = 0;
@@ -1637,7 +1456,7 @@ static void heuristic_collect_sample(struct inode *inode, u64 start, u64 end,
  *
  * For now is's a naive and optimistic 'return true', we'll extend the logic to
  * quickly (compared to direct compression) detect data characteristics
- * (compressible/uncompressible) to avoid wasting CPU time on uncompressible
+ * (compressible/incompressible) to avoid wasting CPU time on incompressible
  * data.
  *
  * The following types of analysis can be performed:

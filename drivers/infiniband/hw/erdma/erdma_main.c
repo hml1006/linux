@@ -4,21 +4,12 @@
 /*          Kai Shen <kaishen@linux.alibaba.com> */
 /* Copyright (c) 2020-2022, Alibaba Group. */
 
-#include <linux/errno.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/list.h>
 #include <linux/module.h>
-#include <linux/netdevice.h>
-#include <linux/pci.h>
 #include <net/addrconf.h>
 #include <rdma/erdma-abi.h>
-#include <rdma/ib_verbs.h>
-#include <rdma/ib_user_verbs.h>
 
 #include "erdma.h"
 #include "erdma_cm.h"
-#include "erdma_hw.h"
 #include "erdma_verbs.h"
 
 MODULE_AUTHOR("Cheng Xu <chengyou@linux.alibaba.com>");
@@ -43,10 +34,15 @@ static int erdma_netdev_event(struct notifier_block *nb, unsigned long event,
 		dev->state = IB_PORT_DOWN;
 		erdma_port_event(dev, IB_EVENT_PORT_ERR);
 		break;
+	case NETDEV_CHANGEMTU:
+		if (dev->mtu != netdev->mtu) {
+			erdma_set_mtu(dev, netdev->mtu);
+			dev->mtu = netdev->mtu;
+		}
+		break;
 	case NETDEV_REGISTER:
 	case NETDEV_UNREGISTER:
 	case NETDEV_CHANGEADDR:
-	case NETDEV_CHANGEMTU:
 	case NETDEV_GOING_DOWN:
 	case NETDEV_CHANGE:
 	default:
@@ -60,7 +56,7 @@ done:
 static int erdma_enum_and_get_netdev(struct erdma_dev *dev)
 {
 	struct net_device *netdev;
-	int ret = -ENODEV;
+	int ret = -EPROBE_DEFER;
 
 	/* Already binded to a net_device, so we skip. */
 	if (dev->netdev)
@@ -104,6 +100,7 @@ static int erdma_device_register(struct erdma_dev *dev)
 	if (ret)
 		return ret;
 
+	dev->mtu = dev->netdev->mtu;
 	addrconf_addr_eui48((u8 *)&ibdev->node_guid, dev->netdev->dev_addr);
 
 	ret = ib_register_device(ibdev, "erdma_%d", &dev->pdev->dev);
@@ -377,6 +374,7 @@ static int erdma_dev_attrs_init(struct erdma_dev *dev)
 	dev->attrs.max_qp = ERDMA_NQP_PER_QBLOCK * ERDMA_GET_CAP(QBLOCK, cap1);
 	dev->attrs.max_mr = dev->attrs.max_qp << 1;
 	dev->attrs.max_cq = dev->attrs.max_qp << 1;
+	dev->attrs.cap_flags = ERDMA_GET_CAP(FLAGS, cap0);
 
 	dev->attrs.max_send_wr = ERDMA_MAX_SEND_WR;
 	dev->attrs.max_ord = ERDMA_MAX_ORD;
@@ -523,13 +521,22 @@ static int erdma_ib_device_add(struct pci_dev *pdev)
 
 	u64_to_ether_addr(mac, dev->attrs.peer_addr);
 
+	dev->reflush_wq = alloc_workqueue("erdma-reflush-wq", WQ_UNBOUND,
+					  WQ_UNBOUND_MAX_ACTIVE);
+	if (!dev->reflush_wq) {
+		ret = -ENOMEM;
+		goto err_alloc_workqueue;
+	}
+
 	ret = erdma_device_register(dev);
 	if (ret)
-		goto err_out;
+		goto err_register;
 
 	return 0;
 
-err_out:
+err_register:
+	destroy_workqueue(dev->reflush_wq);
+err_alloc_workqueue:
 	xa_destroy(&dev->qp_xa);
 	xa_destroy(&dev->cq_xa);
 
@@ -545,6 +552,7 @@ static void erdma_ib_device_remove(struct pci_dev *pdev)
 	unregister_netdevice_notifier(&dev->netdev_nb);
 	ib_unregister_device(&dev->ibdev);
 
+	destroy_workqueue(dev->reflush_wq);
 	erdma_res_cb_free(dev);
 	xa_destroy(&dev->qp_xa);
 	xa_destroy(&dev->cq_xa);

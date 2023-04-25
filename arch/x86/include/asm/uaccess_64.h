@@ -18,32 +18,26 @@
 
 /* Handles exceptions in both to and from, but doesn't do access_ok */
 __must_check unsigned long
-copy_user_enhanced_fast_string(void *to, const void *from, unsigned len);
-__must_check unsigned long
-copy_user_generic_string(void *to, const void *from, unsigned len);
-__must_check unsigned long
-copy_user_generic_unrolled(void *to, const void *from, unsigned len);
+rep_movs_alternative(void *to, const void *from, unsigned len);
 
 static __always_inline __must_check unsigned long
-copy_user_generic(void *to, const void *from, unsigned len)
+copy_user_generic(void *to, const void *from, unsigned long len)
 {
-	unsigned ret;
-
+	stac();
 	/*
-	 * If CPU has ERMS feature, use copy_user_enhanced_fast_string.
-	 * Otherwise, if CPU has rep_good feature, use copy_user_generic_string.
-	 * Otherwise, use copy_user_generic_unrolled.
+	 * If CPU has FSRM feature, use 'rep movs'.
+	 * Otherwise, use rep_movs_alternative.
 	 */
-	alternative_call_2(copy_user_generic_unrolled,
-			 copy_user_generic_string,
-			 X86_FEATURE_REP_GOOD,
-			 copy_user_enhanced_fast_string,
-			 X86_FEATURE_ERMS,
-			 ASM_OUTPUT2("=a" (ret), "=D" (to), "=S" (from),
-				     "=d" (len)),
-			 "1" (to), "2" (from), "3" (len)
-			 : "memory", "rcx", "r8", "r9", "r10", "r11");
-	return ret;
+	asm volatile(
+		"1:\n\t"
+		ALTERNATIVE("rep movsb",
+			    "call rep_movs_alternative", ALT_NOT(X86_FEATURE_FSRM))
+		"2:\n"
+		_ASM_EXTABLE_UA(1b, 2b)
+		:"+c" (len), "+D" (to), "+S" (from), ASM_CALL_CONSTRAINT
+		: : "memory", "rax", "r8", "r9", "r10", "r11");
+	clac();
+	return len;
 }
 
 static __always_inline __must_check unsigned long
@@ -58,9 +52,7 @@ raw_copy_to_user(void __user *dst, const void *src, unsigned long size)
 	return copy_user_generic((__force void *)dst, src, size);
 }
 
-extern long __copy_user_nocache(void *dst, const void __user *src,
-				unsigned size, int zerorest);
-
+extern long __copy_user_nocache(void *dst, const void __user *src, unsigned size);
 extern long __copy_user_flushcache(void *dst, const void __user *src, unsigned size);
 extern void memcpy_page_flushcache(char *to, struct page *page, size_t offset,
 			   size_t len);
@@ -69,8 +61,12 @@ static inline int
 __copy_from_user_inatomic_nocache(void *dst, const void __user *src,
 				  unsigned size)
 {
+	long ret;
 	kasan_check_write(dst, size);
-	return __copy_user_nocache(dst, src, size, 0);
+	stac();
+	ret = __copy_user_nocache(dst, src, size);
+	clac();
+	return ret;
 }
 
 static inline int
@@ -78,5 +74,42 @@ __copy_from_user_flushcache(void *dst, const void __user *src, unsigned size)
 {
 	kasan_check_write(dst, size);
 	return __copy_user_flushcache(dst, src, size);
+}
+
+/*
+ * Zero Userspace.
+ */
+
+__must_check unsigned long
+rep_stos_alternative(void __user *addr, unsigned long len);
+
+static __always_inline __must_check unsigned long __clear_user(void __user *addr, unsigned long size)
+{
+	might_fault();
+	stac();
+
+	/*
+	 * No memory constraint because it doesn't change any memory gcc
+	 * knows about.
+	 */
+	asm volatile(
+		"1:\n\t"
+		ALTERNATIVE("rep stosb",
+			    "call rep_stos_alternative", ALT_NOT(X86_FEATURE_FSRS))
+		"2:\n"
+	       _ASM_EXTABLE_UA(1b, 2b)
+	       : "+c" (size), "+D" (addr), ASM_CALL_CONSTRAINT
+	       : "a" (0));
+
+	clac();
+
+	return size;
+}
+
+static __always_inline unsigned long clear_user(void __user *to, unsigned long n)
+{
+	if (access_ok(to, n))
+		return __clear_user(to, n);
+	return n;
 }
 #endif /* _ASM_X86_UACCESS_64_H */

@@ -832,8 +832,7 @@ static irqreturn_t us5182d_irq_thread_handler(int irq, void *private)
 	return IRQ_HANDLED;
 }
 
-static int us5182d_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int us5182d_probe(struct i2c_client *client)
 {
 	struct us5182d_data *data;
 	struct iio_dev *indio_dev;
@@ -904,7 +903,7 @@ out_err:
 
 }
 
-static int us5182d_remove(struct i2c_client *client)
+static void us5182d_remove(struct i2c_client *client)
 {
 	struct us5182d_data *data = iio_priv(i2c_get_clientdata(client));
 	int ret;
@@ -918,8 +917,6 @@ static int us5182d_remove(struct i2c_client *client)
 	if (ret)
 		dev_warn(&client->dev, "Failed to shut down (%pe)\n",
 			 ERR_PTR(ret));
-
-	return 0;
 }
 
 static int us5182d_suspend(struct device *dev)
@@ -977,7 +974,7 @@ static struct i2c_driver us5182d_driver = {
 		.of_match_table = us5182d_of_match,
 		.acpi_match_table = ACPI_PTR(us5182d_acpi_match),
 	},
-	.probe = us5182d_probe,
+	.probe_new = us5182d_probe,
 	.remove = us5182d_remove,
 	.id_table = us5182d_id,
 

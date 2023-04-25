@@ -110,8 +110,8 @@
 #define TWL6030_BASEADD_PWM		0x00BA
 #define TWL6030_BASEADD_GASGAUGE	0x00C0
 #define TWL6030_BASEADD_PIH		0x00D0
-#define TWL6030_BASEADD_CHARGER		0x00E0
 #define TWL6032_BASEADD_CHARGER		0x00DA
+#define TWL6030_BASEADD_CHARGER		0x00E0
 #define TWL6030_BASEADD_LED		0x00F4
 
 /* subchip/slave 2 0x4A - DFT */
@@ -353,6 +353,9 @@ static struct twl_mapping twl6030_map[] = {
 	{ 2, TWL6030_BASEADD_ZERO },
 	{ 1, TWL6030_BASEADD_GPADC_CTRL },
 	{ 1, TWL6030_BASEADD_GASGAUGE },
+
+	/* TWL6032 specific charger registers */
+	{ 1, TWL6032_BASEADD_CHARGER },
 };
 
 static const struct regmap_config twl6030_regmap_config[3] = {
@@ -727,7 +730,7 @@ static void clocks_init(struct device *dev)
 /*----------------------------------------------------------------------*/
 
 
-static int twl_remove(struct i2c_client *client)
+static void twl_remove(struct i2c_client *client)
 {
 	unsigned i, num_slaves;
 
@@ -745,7 +748,6 @@ static int twl_remove(struct i2c_client *client)
 		twl->client = NULL;
 	}
 	twl_priv->ready = false;
-	return 0;
 }
 
 static struct of_dev_auxdata twl_auxdata_lookup[] = {
@@ -755,8 +757,9 @@ static struct of_dev_auxdata twl_auxdata_lookup[] = {
 
 /* NOTE: This driver only handles a single twl4030/tps659x0 chip */
 static int
-twl_probe(struct i2c_client *client, const struct i2c_device_id *id)
+twl_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct device_node		*node = client->dev.of_node;
 	struct platform_device		*pdev;
 	const struct regmap_config	*twl_regmap_config;
@@ -803,10 +806,6 @@ twl_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if ((id->driver_data) & TWL6030_CLASS) {
 		twl_priv->twl_id = TWL6030_CLASS_ID;
 		twl_priv->twl_map = &twl6030_map[0];
-		/* The charger base address is different in twl6032 */
-		if ((id->driver_data) & TWL6032_SUBCLASS)
-			twl_priv->twl_map[TWL_MODULE_MAIN_CHARGE].base =
-							TWL6032_BASEADD_CHARGER;
 		twl_regmap_config = twl6030_regmap_config;
 	} else {
 		twl_priv->twl_id = TWL4030_CLASS_ID;
@@ -883,7 +882,7 @@ twl_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	 * SR_I2C_SCL_CTRL_PU(bit 4)=0 and SR_I2C_SDA_CTRL_PU(bit 6)=0.
 	 *
 	 * Also, always enable SmartReflex bit as that's needed for omaps to
-	 * to do anything over I2C4 for voltage scaling even if SmartReflex
+	 * do anything over I2C4 for voltage scaling even if SmartReflex
 	 * is disabled. Without the SmartReflex bit omap sys_clkreq idle
 	 * signal will never trigger for retention idle.
 	 */
@@ -956,7 +955,7 @@ static struct i2c_driver twl_driver = {
 	.driver.name	= DRIVER_NAME,
 	.driver.pm	= &twl_dev_pm_ops,
 	.id_table	= twl_ids,
-	.probe		= twl_probe,
+	.probe_new	= twl_probe,
 	.remove		= twl_remove,
 };
 builtin_i2c_driver(twl_driver);

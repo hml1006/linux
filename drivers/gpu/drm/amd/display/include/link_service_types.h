@@ -83,6 +83,7 @@ enum link_training_result {
 };
 
 enum lttpr_mode {
+	LTTPR_MODE_UNKNOWN,
 	LTTPR_MODE_NON_LTTPR,
 	LTTPR_MODE_TRANSPARENT,
 	LTTPR_MODE_NON_TRANSPARENT,
@@ -164,7 +165,12 @@ enum dp_test_pattern {
 	DP_TEST_PATTERN_PRBS23,
 	DP_TEST_PATTERN_PRBS31,
 	DP_TEST_PATTERN_264BIT_CUSTOM,
-	DP_TEST_PATTERN_SQUARE_PULSE,
+	DP_TEST_PATTERN_SQUARE_BEGIN,
+	DP_TEST_PATTERN_SQUARE = DP_TEST_PATTERN_SQUARE_BEGIN,
+	DP_TEST_PATTERN_SQUARE_PRESHOOT_DISABLED,
+	DP_TEST_PATTERN_SQUARE_DEEMPHASIS_DISABLED,
+	DP_TEST_PATTERN_SQUARE_PRESHOOT_DEEMPHASIS_DISABLED,
+	DP_TEST_PATTERN_SQUARE_END = DP_TEST_PATTERN_SQUARE_PRESHOOT_DEEMPHASIS_DISABLED,
 
 	/* Link Training Patterns */
 	DP_TEST_PATTERN_TRAINING_PATTERN1,
@@ -246,8 +252,16 @@ union dpcd_training_lane_set {
 };
 
 
+/* AMD's copy of various payload data for MST. We have two copies of the payload table (one in DRM,
+ * one in DC) since DRM's MST helpers can't be accessed here. This stream allocation table should
+ * _ONLY_ be filled out from DM and then passed to DC, do NOT use these for _any_ kind of atomic
+ * state calculations in DM, or you will break something.
+ */
+
+struct drm_dp_mst_port;
+
 /* DP MST stream allocation (payload bandwidth number) */
-struct dp_mst_stream_allocation {
+struct dc_dp_mst_stream_allocation {
 	uint8_t vcp_id;
 	/* number of slots required for the DP stream in
 	 * transport packet */
@@ -255,11 +269,11 @@ struct dp_mst_stream_allocation {
 };
 
 /* DP MST stream allocation table */
-struct dp_mst_stream_allocation_table {
+struct dc_dp_mst_stream_allocation_table {
 	/* number of DP video streams */
 	int stream_count;
 	/* array of stream allocations */
-	struct dp_mst_stream_allocation stream_allocations[MAX_CONTROLLER_NUM];
+	struct dc_dp_mst_stream_allocation stream_allocations[MAX_CONTROLLER_NUM];
 };
 
 #endif /*__DAL_LINK_SERVICE_TYPES_H__*/

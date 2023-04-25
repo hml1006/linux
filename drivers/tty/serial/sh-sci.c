@@ -31,6 +31,7 @@
 #include <linux/ioport.h>
 #include <linux/ktime.h>
 #include <linux/major.h>
+#include <linux/minmax.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/of.h>
@@ -1181,10 +1182,7 @@ static void sci_dma_tx_complete(void *arg)
 
 	spin_lock_irqsave(&port->lock, flags);
 
-	xmit->tail += s->tx_dma_len;
-	xmit->tail &= UART_XMIT_SIZE - 1;
-
-	port->icount.tx += s->tx_dma_len;
+	uart_xmit_advance(port, s->tx_dma_len);
 
 	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
 		uart_write_wakeup(port);
@@ -1407,10 +1405,8 @@ static void sci_dma_tx_work_fn(struct work_struct *work)
 	spin_lock_irq(&port->lock);
 	head = xmit->head;
 	tail = xmit->tail;
-	buf = s->tx_dma_addr + (tail & (UART_XMIT_SIZE - 1));
-	s->tx_dma_len = min_t(unsigned int,
-		CIRC_CNT(head, tail, UART_XMIT_SIZE),
-		CIRC_CNT_TO_END(head, tail, UART_XMIT_SIZE));
+	buf = s->tx_dma_addr + tail;
+	s->tx_dma_len = CIRC_CNT_TO_END(head, tail, UART_XMIT_SIZE);
 	if (!s->tx_dma_len) {
 		/* Transmit buffer has been flushed */
 		spin_unlock_irq(&port->lock);
@@ -2367,7 +2363,7 @@ static void sci_reset(struct uart_port *port)
 }
 
 static void sci_set_termios(struct uart_port *port, struct ktermios *termios,
-			    struct ktermios *old)
+		            const struct ktermios *old)
 {
 	unsigned int baud, smr_val = SCSMR_ASYNC, scr_val = 0, i, bits;
 	unsigned int brr = 255, cks = 0, srr = 15, dl = 0, sccks = 0;
@@ -2869,6 +2865,13 @@ static int sci_init_single(struct platform_device *dev,
 			sci_port->irqs[i] = platform_get_irq(dev, i);
 	}
 
+	/*
+	 * The fourth interrupt on SCI port is transmit end interrupt, so
+	 * shuffle the interrupts.
+	 */
+	if (p->type == PORT_SCI)
+		swap(sci_port->irqs[SCIx_BRI_IRQ], sci_port->irqs[SCIx_TEI_IRQ]);
+
 	/* The SCI generates several interrupts. They can be muxed together or
 	 * connected to different interrupt lines. In the muxed case only one
 	 * interrupt resource is specified as there is only one interrupt ID.
@@ -2934,7 +2937,7 @@ static int sci_init_single(struct platform_device *dev,
 	port->flags		= UPF_FIXED_PORT | UPF_BOOT_AUTOCONF | p->flags;
 	port->fifosize		= sci_port->params->fifosize;
 
-	if (port->type == PORT_SCI) {
+	if (port->type == PORT_SCI && !dev->dev.of_node) {
 		if (sci_port->reg_size >= 0x20)
 			port->regshift = 2;
 		else
@@ -3056,14 +3059,28 @@ static struct console serial_console = {
 };
 
 #ifdef CONFIG_SUPERH
+static char early_serial_buf[32];
+
+static int early_serial_console_setup(struct console *co, char *options)
+{
+	/*
+	 * This early console is always registered using the earlyprintk=
+	 * parameter, which does not call add_preferred_console(). Thus
+	 * @options is always NULL and the options for this early console
+	 * are passed using a custom buffer.
+	 */
+	WARN_ON(options);
+
+	return serial_console_setup(co, early_serial_buf);
+}
+
 static struct console early_serial_console = {
 	.name           = "early_ttySC",
 	.write          = serial_console_write,
+	.setup		= early_serial_console_setup,
 	.flags          = CON_PRINTBUFFER,
 	.index		= -1,
 };
-
-static char early_serial_buf[32];
 
 static int sci_probe_earlyprintk(struct platform_device *pdev)
 {
@@ -3075,8 +3092,6 @@ static int sci_probe_earlyprintk(struct platform_device *pdev)
 	early_serial_console.index = pdev->id;
 
 	sci_init_single(pdev, &sci_ports[pdev->id], pdev->id, cfg, true);
-
-	serial_console_setup(&early_serial_console, early_serial_buf);
 
 	if (!strstr(early_serial_buf, "keep"))
 		early_serial_console.flags |= CON_BOOT;

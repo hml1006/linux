@@ -488,7 +488,7 @@ found_entry:
 	case RC_NOCACHE:
 		break;
 	case RC_REPLSTAT:
-		svc_putu32(&rqstp->rq_res.head[0], rp->c_replstat);
+		xdr_stream_encode_be32(&rqstp->rq_res_stream, rp->c_replstat);
 		rtn = RC_REPLY;
 		break;
 	case RC_REPLBUFF:
@@ -509,7 +509,7 @@ out_trace:
  * nfsd_cache_update - Update an entry in the duplicate reply cache.
  * @rqstp: svc_rqst with a finished Reply
  * @cachetype: which cache to update
- * @statp: Reply's status code
+ * @statp: pointer to Reply's NFS status code, or NULL
  *
  * This is called from nfsd_dispatch when the procedure has been
  * executed and the complete reply is in rqstp->rq_res.
@@ -604,9 +604,10 @@ nfsd_cache_append(struct svc_rqst *rqstp, struct kvec *data)
  * scraping this file for info should test the labels to ensure they're
  * getting the correct field.
  */
-static int nfsd_reply_cache_stats_show(struct seq_file *m, void *v)
+int nfsd_reply_cache_stats_show(struct seq_file *m, void *v)
 {
-	struct nfsd_net *nn = m->private;
+	struct nfsd_net *nn = net_generic(file_inode(m->file)->i_sb->s_fs_info,
+					  nfsd_net_id);
 
 	seq_printf(m, "max entries:           %u\n", nn->max_drc_entries);
 	seq_printf(m, "num entries:           %u\n",
@@ -625,12 +626,4 @@ static int nfsd_reply_cache_stats_show(struct seq_file *m, void *v)
 	seq_printf(m, "longest chain len:     %u\n", nn->longest_chain);
 	seq_printf(m, "cachesize at longest:  %u\n", nn->longest_chain_cachesize);
 	return 0;
-}
-
-int nfsd_reply_cache_stats_open(struct inode *inode, struct file *file)
-{
-	struct nfsd_net *nn = net_generic(file_inode(file)->i_sb->s_fs_info,
-								nfsd_net_id);
-
-	return single_open(file, nfsd_reply_cache_stats_show, nn);
 }
