@@ -47,7 +47,7 @@
  *
  * The requirements are:
  *   MMU = off, D-cache = off, I-cache = on or off,
- *   x0 = physical address to the FDT blob.
+ *   x0 = physical address to the FDT blob. x0 指向设备树地址
  *
  * Note that the callee-saved registers are used for storing variables
  * that are useful before the MMU is enabled. The allocations are described

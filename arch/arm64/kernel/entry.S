@@ -28,13 +28,21 @@
 #include <asm/thread_info.h>
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
-
+	/*
+	* 宏，把所有通用寄存器清0
+	*/
 	.macro	clear_gp_regs
+	/*
+	* irq伪指令，会生成32个mov指令清零所有寄存器
+	*/
 	.irp	n,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
 	mov	x\n, xzr
 	.endr
 	.endm
 
+	/*
+	* 定义中断向量entry，一个entry可以达到128字节，
+	*/
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
 .Lventry_start\@:
@@ -507,7 +515,15 @@ tsk	.req	x28		// current thread_info
  * Exception vectors.
  */
 	.pushsection ".entry.text", "ax"
+/**
+如果发生异常后并没有exception level切换，并且发生异常之前使用的栈指针是SP_EL0，那么使用第一组异常向量表。不知道有什么场景，linux没处理
 
+如果发生异常后并没有exception level切换，并且发生异常之前使用的栈指针是SP_EL1/2/3，那么使用第二组异常向量表。异常发生在内核态
+
+如果发生异常导致了exception level切换，并且发生异常之前的exception level运行在AARCH64模式，那么使用第三组异常向量表。系统调用
+
+如果发生异常导致了exception level切换，并且发生异常之前的exception level运行在AARCH32模式，那么使用第四组异常向量表。用户态跑的aarch32程序，执行了系统调用
+**/
 	.align	11
 SYM_CODE_START(vectors)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
