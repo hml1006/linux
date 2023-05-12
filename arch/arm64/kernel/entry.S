@@ -42,10 +42,15 @@
 
 	/*
 	* 定义中断向量entry，一个entry可以达到128字节，
+	* el 异常级别，regsize 寄存器大小 label 跳转入口地址
 	*/
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
+	/* 2^7 对齐，align伪指令在x86和arm不一样 */
 	.align 7
 .Lventry_start\@:
+	/*
+	* el0不是linux支持的场景，正常arm配置el0发生中断cpu会自动切el1
+	*/
 	.if	\el == 0
 	/*
 	 * This must be the first instruction of the EL0 vector entries. It is
@@ -53,6 +58,9 @@
 	 */
 	b	.Lskip_tramp_vectors_cleanup\@
 	.if	\regsize == 64
+	/*
+	* 备份thread id信息到x30寄存器，然后清0 thread id寄存器
+	*/
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
 	.else
@@ -61,6 +69,7 @@
 .Lskip_tramp_vectors_cleanup\@:
 	.endif
 
+	/*分配需要保存的现场寄存器栈空间，栈必须对齐 THREAD_SHIFT*/
 	sub	sp, sp, #PT_REGS_SIZE
 #ifdef CONFIG_VMAP_STACK
 	/*
@@ -73,7 +82,7 @@
 	tbnz	x0, #THREAD_SHIFT, 0f
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
-	b	el\el\ht\()_\regsize\()_\label
+	b	el\el\ht\()_\regsize\()_\label	// 跳转到对应handler
 
 0:
 	/*
