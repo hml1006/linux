@@ -53,11 +53,20 @@
  * that are useful before the MMU is enabled. The allocations are described
  * in the entry routines.
  */
-	__HEAD
+ /**
+ 为什么跳转到内核时指令高速缓存可以打开，数据高速缓存必须关闭？
+ 首先L1 icache是无法关闭的，其次dcache依赖mmu，mmu关闭，dcache无法使用。mmu关闭，所有内存默认non-cacheable
+ **/
+	__HEAD	// .section	".head.text","ax" 指定section
 	/*
 	 * DO NOT MODIFY. Image header expected by Linux boot-loaders.
 	 */
+	 /**
+	 efi_signature_nop 其作用是在 EFI 签名列表中添加一个空占位符项
+	 **/
 	efi_signature_nop			// special NOP to identity as PE/COFF executable
+	// 内核启动初始入口
+	// b 指令使用label，是相对地址，使用寄存器是绝对地址跳转
 	b	primary_entry			// branch to kernel start, magic
 	.quad	0				// Image load offset from start of RAM, little-endian
 	le64sym	_kernel_size_le			// Effective size of kernel image, little-endian
@@ -87,21 +96,22 @@
 	 *  x28        create_idmap()                           callee preserved temp register
 	 */
 SYM_CODE_START(primary_entry)
-	bl	record_mmu_state
-	bl	preserve_boot_args
-	bl	create_idmap
+	bl	record_mmu_state	// 从系统控制寄存器提取mmu开启关闭状态放入x19
+	bl	preserve_boot_args	// 把BootLoader传递的x0-x3寄存器放入boot_args数组
+	bl	create_idmap		// 创建虚地址到物理地址的一一映射，开启MMU要用到
 
 	/*
 	 * If we entered with the MMU and caches on, clean the ID mapped part
 	 * of the primary boot code to the PoC so we can safely execute it with
 	 * the MMU off.
 	 */
+	 // 正常情况MMU是关闭的，所以会跳转到标签 0
 	cbz	x19, 0f
 	adrp	x0, __idmap_text_start
 	adr_l	x1, __idmap_text_end
 	adr_l	x2, dcache_clean_poc
 	blr	x2
-0:	mov	x0, x19
+0:	mov	x0, x19	// mmu 状态放 x0
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	mov	x20, x0
 
@@ -125,16 +135,16 @@ SYM_CODE_END(primary_entry)
 
 	__INIT
 SYM_CODE_START_LOCAL(record_mmu_state)
-	mrs	x19, CurrentEL
-	cmp	x19, #CurrentEL_EL2
-	mrs	x19, sctlr_el1
-	b.ne	0f
-	mrs	x19, sctlr_el2
+	mrs	x19, CurrentEL	// 获取当前运行级别
+	cmp	x19, #CurrentEL_EL2	// 和EL2级别比较
+	mrs	x19, sctlr_el1	// 获取 el1 系统控制寄存器内容
+	b.ne	0f		// 如果当前不是EL2，跳转到label 0
+	mrs	x19, sctlr_el2	// 当前是 el2, 获取el2 系统控制寄存器内容
 0:
-CPU_LE( tbnz	x19, #SCTLR_ELx_EE_SHIFT, 1f	)
+CPU_LE( tbnz	x19, #SCTLR_ELx_EE_SHIFT, 1f	) // 该bit为0是小端，为1是大端，所以用了两个test bit指令分别判断0和1，cpu实际大小端和宏定义的不一致，需要校正
 CPU_BE( tbz	x19, #SCTLR_ELx_EE_SHIFT, 1f	)
-	tst	x19, #SCTLR_ELx_C		// Z := (C == 0)
-	and	x19, x19, #SCTLR_ELx_M		// isolate M bit
+	tst	x19, #SCTLR_ELx_C		// Z := (C == 0), C为i cache和d cache开关，1 - enable， 0 - disable
+	and	x19, x19, #SCTLR_ELx_M		// isolate M bit，提取mmu状态
 	csel	x19, xzr, x19, eq		// clear x19 if Z
 	ret
 
@@ -144,14 +154,15 @@ CPU_BE( tbz	x19, #SCTLR_ELx_EE_SHIFT, 1f	)
 	 * this means the MMU must be disabled, or the active ID map will end
 	 * up getting interpreted with the wrong byte order.
 	 */
-1:	eor	x19, x19, #SCTLR_ELx_EE
-	bic	x19, x19, #SCTLR_ELx_M
-	b.ne	2f
-	pre_disable_mmu_workaround
+	 // 代码定义的大小端和cpu寄存器读出来的大小端不一致，需要校正
+1:	eor	x19, x19, #SCTLR_ELx_EE	// x19中大小端bit翻转
+	bic	x19, x19, #SCTLR_ELx_M	// x19中mmu比特位关闭， 大小端对应bit发生翻转
+	b.ne	2f	// 大端跳转label 2
+	pre_disable_mmu_workaround	// 普通cpu为空
 	msr	sctlr_el2, x19
 	b	3f
 	pre_disable_mmu_workaround
-2:	msr	sctlr_el1, x19
+2:	msr	sctlr_el1, x19	// 改成小端，mmu关闭
 3:	isb
 	mov	x19, xzr
 	ret
@@ -159,10 +170,12 @@ SYM_CODE_END(record_mmu_state)
 
 /*
  * Preserve the arguments passed by the bootloader in x0 .. x3
+ 保存BootLoader传递的参数
  */
 SYM_CODE_START_LOCAL(preserve_boot_args)
 	mov	x21, x0				// x21=FDT
 
+	// 获取boot_args地址，这个变量数组在setup.c中，用于保存x0 .. x3
 	adr_l	x0, boot_args			// record the contents of
 	stp	x21, x1, [x0]			// x0 .. x3 at kernel entry
 	stp	x2, x3, [x0, #16]
@@ -172,8 +185,9 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
 						// MMU off
 
 	add	x1, x0, #0x20			// 4 x 8 bytes
+	// clean & invalidate boot_args数据
 	b	dcache_inval_poc		// tail call
-0:	str_l   x19, mmu_enabled_at_boot, x0
+0:	str_l   x19, mmu_enabled_at_boot, x0	// mmu状态存储到这个变量，后续会用到
 	ret
 SYM_CODE_END(preserve_boot_args)
 
@@ -207,10 +221,10 @@ SYM_FUNC_END(clear_page_tables)
 	.macro populate_entries, tbl, rtbl, index, eindex, flags, inc, tmp1
 .Lpe\@:	phys_to_pte \tmp1, \rtbl
 	orr	\tmp1, \tmp1, \flags	// tmp1 = table entry
-	str	\tmp1, [\tbl, \index, lsl #3]
+	str	\tmp1, [\tbl, \index, lsl #3]	// 写entry到页表， index << 3为页表内的偏移
 	add	\rtbl, \rtbl, \inc	// rtbl = pa next level
-	add	\index, \index, #1
-	cmp	\index, \eindex
+	add	\index, \index, #1	// index++
+	cmp	\index, \eindex		// index == eindex 填充结束
 	b.ls	.Lpe\@
 	.endm
 
@@ -233,10 +247,10 @@ SYM_FUNC_END(clear_page_tables)
  * Returns:	istart, iend, count
  */
 	.macro compute_indices, vstart, vend, shift, order, istart, iend, count
-	ubfx	\istart, \vstart, \shift, \order
-	ubfx	\iend, \vend, \shift, \order
+	ubfx	\istart, \vstart, \shift, \order	// 提取起始页目录索引
+	ubfx	\iend, \vend, \shift, \order		// 提取结束页目录索引
 	add	\iend, \iend, \count, lsl \order
-	sub	\count, \iend, \istart
+	sub	\count, \iend, \istart			// 计算entry数量
 	.endm
 
 /*
@@ -261,7 +275,7 @@ SYM_FUNC_END(clear_page_tables)
  */
 	.macro map_memory, tbl, rtbl, vstart, vend, flags, phys, order, istart, iend, tmp, count, sv, extra_shift
 	sub \vend, \vend, #1
-	add \rtbl, \tbl, #PAGE_SIZE
+	add \rtbl, \tbl, #PAGE_SIZE	// l1 页表entry,用于填充l0表项
 	mov \count, #0
 
 	.ifnb	\extra_shift
@@ -273,12 +287,15 @@ SYM_FUNC_END(clear_page_tables)
 	mov \tbl, \sv
 	.endif
 .L_\@:
+	// 计算指定虚地址起止索引和数量
 	compute_indices \vstart, \vend, #PGDIR_SHIFT, #\order, \istart, \iend, \count
 	mov \sv, \rtbl
+	// 填充l0页表项
 	populate_entries \tbl, \rtbl, \istart, \iend, #PMD_TYPE_TABLE, #PAGE_SIZE, \tmp
 	mov \tbl, \sv
 
 #if SWAPPER_PGTABLE_LEVELS > 3
+	// 填充l1
 	compute_indices \vstart, \vend, #PUD_SHIFT, #(PAGE_SHIFT - 3), \istart, \iend, \count
 	mov \sv, \rtbl
 	populate_entries \tbl, \rtbl, \istart, \iend, #PMD_TYPE_TABLE, #PAGE_SIZE, \tmp
@@ -286,12 +303,13 @@ SYM_FUNC_END(clear_page_tables)
 #endif
 
 #if SWAPPER_PGTABLE_LEVELS > 2
+	// 填充l2
 	compute_indices \vstart, \vend, #SWAPPER_TABLE_SHIFT, #(PAGE_SHIFT - 3), \istart, \iend, \count
 	mov \sv, \rtbl
 	populate_entries \tbl, \rtbl, \istart, \iend, #PMD_TYPE_TABLE, #PAGE_SIZE, \tmp
 	mov \tbl, \sv
 #endif
-
+	// 填充l3
 	compute_indices \vstart, \vend, #SWAPPER_BLOCK_SHIFT, #(PAGE_SHIFT - 3), \istart, \iend, \count
 	bic \rtbl, \phys, #SWAPPER_BLOCK_SIZE - 1
 	populate_entries \tbl, \rtbl, \istart, \iend, \flags, #SWAPPER_BLOCK_SIZE, \tmp
@@ -327,6 +345,7 @@ SYM_FUNC_START_LOCAL(remap_region)
 	mov	x1, #1
 	lsl	x6, x1, x6		// block size at this level
 
+	// 填充最后一级页表
 	populate_entries x0, x4, x2, x3, x5, x6, x7
 	ret
 SYM_FUNC_END(remap_region)
@@ -379,11 +398,12 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	 * translation level, but the top-level table has more entries.
 	 */
 #endif
-	adrp	x0, init_idmap_pg_dir
+	adrp	x0, init_idmap_pg_dir	// 在vmlinux.lds.S中定义
 	adrp	x3, _text
 	adrp	x6, _end + MAX_FDT_SIZE + SWAPPER_BLOCK_SIZE
 	mov	x7, SWAPPER_RX_MMUFLAGS
 
+	// 创建映射表
 	map_memory x0, x1, x3, x6, x7, x3, IDMAP_PGD_ORDER, x10, x11, x12, x13, x14, EXTRA_SHIFT
 
 	/* Remap the kernel page tables r/w in the ID map */
@@ -412,11 +432,12 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	 * remove any speculatively loaded cache lines.
 	 */
 	cbnz	x19, 0f				// skip cache invalidation if MMU is on
-	dmb	sy
+	dmb	sy	// 系统级屏障
 
+	// clean & invalidate 全局页表
 	adrp	x0, init_idmap_pg_dir
 	adrp	x1, init_idmap_pg_end
-	bl	dcache_inval_poc
+	bl	dcache_inval_poc	// clean & invalidate dcache
 0:	ret	x28
 SYM_FUNC_END(create_idmap)
 
