@@ -55,7 +55,7 @@
 	.endm
 
 	.macro	enable_dbg
-	msr	daifclr, #8
+	msr	daifclr, #8		// 清除 debug mask
 	.endm
 
 	.macro	disable_step_tsk, flgs, tmp

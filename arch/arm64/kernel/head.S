@@ -113,7 +113,7 @@ SYM_CODE_START(primary_entry)
 	blr	x2
 0:	mov	x0, x19	// mmu 状态放 x0
 	bl	init_kernel_el			// w0=cpu_boot_mode
-	mov	x20, x0
+	mov	x20, x0					// 把x0 中的CPU boot mode备份到x20
 
 	/*
 	 * The following calls CPU setup code, see arch/arm64/mm/proc.S for
@@ -122,14 +122,14 @@ SYM_CODE_START(primary_entry)
 	 * the TCR will have been set.
 	 */
 #if VA_BITS > 48
-	mrs_s	x0, SYS_ID_AA64MMFR2_EL1
-	tst	x0, #0xf << ID_AA64MMFR2_EL1_VARange_SHIFT
+	mrs_s	x0, SYS_ID_AA64MMFR2_EL1				// 取出arm64内存管理特性寄存器内容
+	tst	x0, #0xf << ID_AA64MMFR2_EL1_VARange_SHIFT	// va range == 0, 48位虚地址，va range == 1 && 粒度64KB, 52位虚地址
 	mov	x0, #VA_BITS
 	mov	x25, #VA_BITS_MIN
-	csel	x25, x25, x0, eq
+	csel	x25, x25, x0, eq						// va bit <= 48 位
 	mov	x0, x25
 #endif
-	bl	__cpu_setup			// initialise processor
+	bl	__cpu_setup			// initialise processor, x0存放的系统控制寄存器内容, mmu on, 下面开启mmu会读x0并写到系统控制寄存器
 	b	__primary_switch
 SYM_CODE_END(primary_entry)
 
@@ -191,6 +191,7 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
 	ret
 SYM_CODE_END(preserve_boot_args)
 
+// 清掉内核页表
 SYM_FUNC_START_LOCAL(clear_page_tables)
 	/*
 	 * Clear the init page tables.
@@ -441,6 +442,7 @@ SYM_FUNC_START_LOCAL(create_idmap)
 0:	ret	x28
 SYM_FUNC_END(create_idmap)
 
+// 根据新的内核虚地址创建页表
 SYM_FUNC_START_LOCAL(create_kernel_mapping)
 	adrp	x0, init_pg_dir
 	mov_q	x5, KIMAGE_VADDR		// compile time __va(_text)
@@ -468,21 +470,23 @@ SYM_FUNC_END(create_kernel_mapping)
 	 * for consistency with user tasks and kthreads.
 	 */
 	.macro	init_cpu_task tsk, tmp1, tmp2
-	msr	sp_el0, \tsk
+	msr	sp_el0, \tsk	// task地址备份到sp_el0
 
+	// 初始化sp寄存器, 栈从高地址向低地址增长
 	ldr	\tmp1, [\tsk, #TSK_STACK]
-	add	sp, \tmp1, #THREAD_SIZE
-	sub	sp, sp, #PT_REGS_SIZE
+	add	sp, \tmp1, #THREAD_SIZE	// sp指向栈底
+	sub	sp, sp, #PT_REGS_SIZE	// stack保留备份寄存器空间
 
-	stp	xzr, xzr, [sp, #S_STACKFRAME]
-	add	x29, sp, #S_STACKFRAME
+	stp	xzr, xzr, [sp, #S_STACKFRAME]	// 清空 stackframe字段
+	add	x29, sp, #S_STACKFRAME			// 设置x29  FP指向stackframe
 
+	// 设置影子调用栈,备份返回地址, 返回时做检查
 	scs_load_current
 
 	adr_l	\tmp1, __per_cpu_offset
 	ldr	w\tmp2, [\tsk, #TSK_TI_CPU]
 	ldr	\tmp1, [\tmp1, \tmp2, lsl #3]
-	set_this_cpu_offset \tmp1
+	set_this_cpu_offset \tmp1	// tpidr_el1, per-cpu实现寄存器
 	.endm
 
 /*
@@ -491,9 +495,10 @@ SYM_FUNC_END(create_kernel_mapping)
  *   x0 = __pa(KERNEL_START)
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
-	adr_l	x4, init_task
-	init_cpu_task x4, x5, x6
+	adr_l	x4, init_task		// struct task_struct init_task
+	init_cpu_task x4, x5, x6	// 初始化task结构体
 
+	// 设置el1 中断向量寄存器, 中断向量位于entry.S
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
 	isb
@@ -501,8 +506,10 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
 
+	// 设备树地址放x21
 	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
 
+	// 内核镜像虚地址放x4, _text
 	ldr_l	x4, kimage_vaddr		// Save the offset between
 	sub	x4, x4, x0			// the kernel virtual and
 	str_l	x4, kimage_voffset, x5		// physical mappings
@@ -541,7 +548,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	mov	x0, x20
 	bl	finalise_el2			// Prefer VHE if possible
 	ldp	x29, x30, [sp], #16
-	bl	start_kernel
+	bl	start_kernel			// 正式进入内核代码
 	ASM_BUG()
 SYM_FUNC_END(__primary_switched)
 
@@ -568,21 +575,21 @@ SYM_FUNC_END(__primary_switched)
 SYM_FUNC_START(init_kernel_el)
 	mrs	x1, CurrentEL
 	cmp	x1, #CurrentEL_EL2
-	b.eq	init_el2
+	b.eq	init_el2	// 当前是EL2, 跳转到el2初始化代码
 
 SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
-	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
+	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF	// 设置mmu off条件下寄存器初始值
 	pre_disable_mmu_workaround
-	msr	sctlr_el1, x0
-	isb
-	mov_q	x0, INIT_PSTATE_EL1
-	msr	spsr_el1, x0
-	msr	elr_el1, lr
-	mov	w0, #BOOT_CPU_MODE_EL1
+	msr	sctlr_el1, x0					// 把上面的值写入系统控制寄存器
+	isb									// 指令屏障，重新取指
+	mov_q	x0, INIT_PSTATE_EL1			// 把el1初始pstate值放入x0
+	msr	spsr_el1, x0					// 设置el1 pstate寄存器
+	msr	elr_el1, lr						// 设置el1 异常返回地址为 lr
+	mov	w0, #BOOT_CPU_MODE_EL1			// 设置boot CPU mode
 	eret
 
 SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
-	msr	elr_el2, lr
+	msr	elr_el2, lr						// 备份lr寄存器
 
 	// clean all HYP code to the PoC if we booted at EL2 with the MMU on
 	cbz	x0, 0f
@@ -592,14 +599,14 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	blr	x2
 0:
 	mov_q	x0, HCR_HOST_NVHE_FLAGS
-	msr	hcr_el2, x0
+	msr	hcr_el2, x0						// 初始化虚拟化控制寄存器
 	isb
 
-	init_el2_state
+	init_el2_state						// 初始化el2 寄存器
 
 	/* Hypervisor stub */
 	adr_l	x0, __hyp_stub_vectors
-	msr	vbar_el2, x0
+	msr	vbar_el2, x0					// 设置虚拟机管理程序异常向量表
 	isb
 
 	mov_q	x1, INIT_SCTLR_EL1_MMU_OFF
@@ -611,21 +618,21 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 */
 	mrs	x0, hcr_el2
 	and	x0, x0, #HCR_E2H
-	cbz	x0, 1f
+	cbz	x0, 1f							// 检查是否设置了E2H, 设置1表示el2运行了一个操作系统, 设置0表示el2运行了虚拟机管理程序
 
 	/* Set a sane SCTLR_EL1, the VHE way */
 	pre_disable_mmu_workaround
-	msr_s	SYS_SCTLR_EL12, x1
-	mov	x2, #BOOT_CPU_FLAG_E2H
-	b	2f
+	msr_s	SYS_SCTLR_EL12, x1			// 设置mmu off下 vhe 模式系统控制寄存器各种功能和权限
+	mov	x2, #BOOT_CPU_FLAG_E2H			// 设置boot cpu flag, vhe模式是虚拟机管理程序和操作系统都运行在el2
+	b	2f								// vhe模式跳过 el1 系统控制寄存器设置, 因为用不到
 
 1:
 	pre_disable_mmu_workaround
-	msr	sctlr_el1, x1
+	msr	sctlr_el1, x1					// 设置 el1 系统控制寄存器
 	mov	x2, xzr
 2:
 	mov	w0, #BOOT_CPU_MODE_EL2
-	orr	x0, x0, x2
+	orr	x0, x0, x2						// 设置当前 boot CPU mode
 	eret
 SYM_FUNC_END(init_kernel_el)
 
@@ -651,7 +658,7 @@ SYM_FUNC_END(secondary_holding_pen)
 	 * Secondary entry point that jumps straight into the kernel. Only to
 	 * be used where CPUs are brought online dynamically by the kernel.
 	 */
-SYM_FUNC_START(secondary_entry)
+SYM_FUNC_START(secondary_entry)	// cpu低功耗相关
 	mov	x0, xzr
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	b	secondary_startup
@@ -754,16 +761,16 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
 	.section ".idmap.text","a"
 SYM_FUNC_START(__enable_mmu)
 	mrs	x3, ID_AA64MMFR0_EL1
-	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4
+	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4	// 提取最小页粒度
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MIN
-	b.lt    __no_granule_support
-	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX
+	b.lt    __no_granule_support						// CPU支持的页面粒度小于代码支持的最小页面粒度, boot failed
+	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX	// 超过CPU支持的最大粒度, failed
 	b.gt    __no_granule_support
 	phys_to_ttbr x2, x2
 	msr	ttbr0_el1, x2			// load TTBR0
 	load_ttbr1 x1, x1, x3
 
-	set_sctlr_el1	x0
+	set_sctlr_el1	x0			// x0寄存器保存了写系统控制寄存器的内容, mmu on已经打开
 
 	ret
 SYM_FUNC_END(__enable_mmu)
@@ -809,6 +816,7 @@ SYM_FUNC_START_LOCAL(__relocate_kernel)
 	mov_q	x11, KIMAGE_VADDR		// default virtual offset
 	add	x11, x11, x23			// actual virtual offset
 
+// 循环修正 .rel section
 0:	cmp	x9, x10
 	b.hs	1f
 	ldp	x12, x13, [x9], #24
@@ -890,11 +898,11 @@ SYM_FUNC_END(__relocate_kernel)
 #endif
 
 SYM_FUNC_START_LOCAL(__primary_switch)
-	adrp	x1, reserved_pg_dir
-	adrp	x2, init_idmap_pg_dir
-	bl	__enable_mmu
+	adrp	x1, reserved_pg_dir			// 保留页表, 用于内核访问user space
+	adrp	x2, init_idmap_pg_dir		// 全局页表
+	bl	__enable_mmu					// 设置页表寄存器, 把x0写入系统控制寄存器, mmu on已打开
 #ifdef CONFIG_RELOCATABLE
-	adrp	x23, KERNEL_START
+	adrp	x23, KERNEL_START			// 取 _text 4K对齐地址
 	and	x23, x23, MIN_KIMG_ALIGN - 1
 #ifdef CONFIG_RANDOMIZE_BASE
 	mov	x0, x22
@@ -907,13 +915,17 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	orr	x23, x23, x0			// record kernel offset
 #endif
 #endif
+	// 清空旧内核image页表
 	bl	clear_page_tables
+	// 创建新的内核页表
 	bl	create_kernel_mapping
 
+	// 重新加载页表
+	// 因为刚刚的页表是虚地址和物理地址一一对应的方式映射, 需要改成内核在高地址空间, 所以需要重新设置页表
 	adrp	x1, init_pg_dir
 	load_ttbr1 x1, x1, x2
 #ifdef CONFIG_RELOCATABLE
-	bl	__relocate_kernel
+	bl	__relocate_kernel	// 重定位
 #endif
 	ldr	x8, =__primary_switched
 	adrp	x0, KERNEL_START		// __pa(KERNEL_START)
