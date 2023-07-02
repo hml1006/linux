@@ -28,6 +28,22 @@
 #include <asm/thread_info.h>
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
+
+/**
+当异常发生时，CPU会自动做如下一些事情。
+
+将处理器状态寄存器PSTATE保存到对应目标异常等级的SPSR_ELx中
+将返回地址保存在对应目标异常等级的ELRELx中
+把PSTATE寄存器里的DAIF域都设置为1，这相当于把调试异常、系统错误 （SError）、IRQ以及FIQ都关闭了。具体异常原因需要查看ESR_ELx
+设置栈指针，指向对应目标异常等级下的栈，自动切换SP到SP_ELx
+CPU处理器会从异常发生现场的异常等级切换到对应目标异常等级，然后跳转到异常向量表并执行
+上述是ARMv8处理器检测到异常发生后自动做的事情。操作系统需要做的事情是从中断向量表开始，根据异常发生的类型，跳转到合适的异常向量表。异常向量表中的每项会保存一个异常处理的跳转函数，然后跳转到恰当的异常处理函数并处理异常。
+
+当操作系统的异常处理完成后，执行一条eret指令即可从异常返回。这条指令会自动完成如下工作
+
+从ELR_ELx中恢复PC指针
+从SPSR_ELx恢复处理器的状态
+**/
 	/*
 	* 宏，把所有通用寄存器清0
 	*/
@@ -48,9 +64,6 @@
 	/* 2^7 对齐，align伪指令在x86和arm不一样 */
 	.align 7
 .Lventry_start\@:
-	/*
-	* el0不是linux支持的场景，正常arm配置el0发生中断cpu会自动切el1
-	*/
 	.if	\el == 0
 	/*
 	 * This must be the first instruction of the EL0 vector entries. It is
@@ -59,7 +72,7 @@
 	b	.Lskip_tramp_vectors_cleanup\@
 	.if	\regsize == 64
 	/*
-	* 备份thread id信息到x30寄存器，然后清0 thread id寄存器
+	* 备份tpidrro_el0到x30寄存器，然后清0,tpidrro_el0寄存器一般用于实现thread local storage
 	*/
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
@@ -79,10 +92,12 @@
 	 */
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
-	tbnz	x0, #THREAD_SHIFT, 0f
+	tbnz	x0, #THREAD_SHIFT, 0f	// 检查sp地址是否 thread shift（一般page size）对齐, 如果是, 则and运算结果为0
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
-	b	el\el\ht\()_\regsize\()_\label	// 跳转到对应handler
+
+	// arch/arm64/kernel/entry-common.c  异常处理程序位置
+	b	el\el\ht\()_\regsize\()_\label	// entry_handler
 
 0:
 	/*
@@ -220,6 +235,7 @@ alternative_cb_end
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
 	.endif
+	// 保存通用寄存器
 	stp	x0, x1, [sp, #16 * 0]
 	stp	x2, x3, [sp, #16 * 1]
 	stp	x4, x5, [sp, #16 * 2]
@@ -526,33 +542,39 @@ tsk	.req	x28		// current thread_info
 	.pushsection ".entry.text", "ax"
 /**
 如果发生异常后并没有exception level切换，并且发生异常之前使用的栈指针是SP_EL0，那么使用第一组异常向量表。不知道有什么场景，linux没处理
-
 如果发生异常后并没有exception level切换，并且发生异常之前使用的栈指针是SP_EL1/2/3，那么使用第二组异常向量表。异常发生在内核态
-
 如果发生异常导致了exception level切换，并且发生异常之前的exception level运行在AARCH64模式，那么使用第三组异常向量表。系统调用
-
 如果发生异常导致了exception level切换，并且发生异常之前的exception level运行在AARCH32模式，那么使用第四组异常向量表。用户态跑的aarch32程序，执行了系统调用
+**/
+/**
+el1_sync：当前处于内核态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）。
+el1_irq：当前处于内核态时，发生硬件中断。
+el0_sync：当前处于用户态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）、系统调用。
+el0_irq：当前处于用户态时，发生了硬件中断。
+**/
+/**
+fiq 快速中断在secure world中使用, 即el3
 **/
 	.align	11
 SYM_CODE_START(vectors)
-	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
-	kernel_ventry	1, t, 64, irq		// IRQ EL1t
-	kernel_ventry	1, t, 64, fiq		// FIQ EL1t
-	kernel_ventry	1, t, 64, error		// Error EL1t
+	kernel_ventry	1, t, 64, sync		// Synchronous EL1t			// 不可用
+	kernel_ventry	1, t, 64, irq		// IRQ EL1t					// 不可用
+	kernel_ventry	1, t, 64, fiq		// FIQ EL1t					// 不可用
+	kernel_ventry	1, t, 64, error		// Error EL1t				// 不可用
 
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
 	kernel_ventry	1, h, 64, irq		// IRQ EL1h
-	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
+	kernel_ventry	1, h, 64, fiq		// FIQ EL1h					// 不可用
 	kernel_ventry	1, h, 64, error		// Error EL1h
 
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
-	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
+	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0			// 不可用
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
 
 	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
 	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0
-	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
+	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0			// 不可用
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors)
 
@@ -603,6 +625,9 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 /*
  * Early exception handlers
  */
+ /**
+ 这些 macro 会展开为很多异常入口函数, kernel_ventry会跳转到此处
+ **/
 	entry_handler	1, t, 64, sync
 	entry_handler	1, t, 64, irq
 	entry_handler	1, t, 64, fiq
