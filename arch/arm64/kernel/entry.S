@@ -253,21 +253,31 @@ alternative_cb_end
 	stp	x28, x29, [sp, #16 * 14]
 
 	.if	\el == 0
+	// 清空通用寄存器
 	clear_gp_regs
+	// el0 sp寄存器
 	mrs	x21, sp_el0
-	ldr_this_cpu	tsk, __entry_task, x20
-	msr	sp_el0, tsk
+	/**
+	arm64 从 EL0 切换进 EL1 的时候保存完上下文之后 sp_el0 就用不到了，所以可以把当前进程的指针保存在 sp_el0 里面快速访问，
+	然后在返回用户态的时候将 sp_el0 保存进 percpu 存储区的 __entry_task，而 percpu 存储区的偏移存在 tpidr_el1 里面，
+	那么下次进入 EL1 的时候就可以用 __entry_task + tpidr_el1 又找到当前 CPU 上的 current，然后存进 sp_el0 里访问
+	**/
+	// 每次任务切换时，将next task放 __entry_task，切换完成后，__entry_task放的就是current task
+	// 用户态到内核态时，把current task放sp el0
+	// tsk .req x28, 所以tsk是x28寄存器，放current thread info
+	ldr_this_cpu	tsk, __entry_task, x20	// 从 __entry_task 获取当前task指针
+	msr	sp_el0, tsk	//sp_el0执行current task
 
 	/*
 	 * Ensure MDSCR_EL1.SS is clear, since we can unmask debug exceptions
 	 * when scheduling.
 	 */
-	ldr	x19, [tsk, #TSK_TI_FLAGS]
-	disable_step_tsk x19, x20
+	ldr	x19, [tsk, #TSK_TI_FLAGS]	// task_struct 中thread_info.flags
+	disable_step_tsk x19, x20		// 关闭单步调试
 
 	/* Check for asynchronous tag check faults in user space */
 	ldr	x0, [tsk, THREAD_SCTLR_USER]
-	check_mte_async_tcf x22, x23, x0
+	check_mte_async_tcf x22, x23, x0	// memory tagged extension功能检查
 
 #ifdef CONFIG_ARM64_PTR_AUTH
 alternative_if ARM64_HAS_ADDRESS_AUTH
@@ -280,20 +290,28 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	 * was disabled on kernel exit then we would have left the kernel IA
 	 * installed so there is no need to install it again.
 	 */
-	tbz	x0, SCTLR_ELx_ENIA_SHIFT, 1f
-	__ptrauth_keys_install_kernel_nosync tsk, x20, x22, x23
+	tbz	x0, SCTLR_ELx_ENIA_SHIFT, 1f	// 检查指针认证功能,内核在每个进程execv时分配一个key，这个key随task一起切换
+	__ptrauth_keys_install_kernel_nosync tsk, x20, x22, x23	// 给task开启 PA功能
 	b	2f
 1:
 	mrs	x0, sctlr_el1
 	orr	x0, x0, SCTLR_ELx_ENIA
-	msr	sctlr_el1, x0
+	msr	sctlr_el1, x0			// 开启PA
 2:
 alternative_else_nop_endif
 #endif
 
+	/**
+	apply_ssbd用于启用 Speculative Store Bypass Disable（SSBD）特性。
+	该函数在 Linux 内核中实现，主要用于 Spectre 漏洞的缓解。
+	SSBD 特性是 ARMv8.5-A 架构中引入的一种硬件特性，用于防止 Spectre 漏洞的攻击。
+	当启用 SSBD 特性时，处理器会禁用对 Store Buffer 的 speculative access，
+	从而防止 Spectre 攻击利用 Store Buffer 的 speculative access 进行信息泄露。
+	在 Linux 系统中，启用 SSBD 特性可以通过设置相应的控制寄存器实现。
+	**/
 	apply_ssbd 1, x22, x23
 
-	mte_set_kernel_gcr x22, x23
+	mte_set_kernel_gcr x22, x23	// 设置Global Control Register启用mte
 
 	/*
 	 * Any non-self-synchronizing system register updates required for
@@ -307,11 +325,11 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	isb
 alternative_else_nop_endif
 1:
-
+	// shadow call stack功能，防ROP攻击
 	scs_load_current
 	.else
 	add	x21, sp, #PT_REGS_SIZE
-	get_current_task tsk
+	get_current_task tsk	// 取current， sp_el0
 	.endif /* \el == 0 */
 	mrs	x22, elr_el1
 	mrs	x23, spsr_el1
@@ -329,6 +347,8 @@ alternative_else_nop_endif
 	.endif
 	add	x29, sp, #S_STACKFRAME
 
+// PAN 功能，禁止内核访问用户空间数据，必须使用copy_from_user, copy_to_user才能访问
+// 实现原理是ttbr0寄存器置零, 这样内核就不能访问页表了, 这个是软件模拟实现，不是armv8 硬件PAN功能
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 alternative_if_not ARM64_HAS_PAN
 	bl	__swpan_entry_el\el
@@ -368,7 +388,7 @@ alternative_else_nop_endif
 
 	.macro	kernel_exit, el
 	.if	\el != 0
-	disable_daif
+	disable_daif	// 禁用 DAIF
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
@@ -391,7 +411,7 @@ alternative_else_nop_endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 alternative_if_not ARM64_HAS_PAN
-	bl	__swpan_exit_el\el
+	bl	__swpan_exit_el\el		// 恢复ttbr0_el1
 alternative_else_nop_endif
 #endif
 
