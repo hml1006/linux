@@ -388,7 +388,7 @@ alternative_else_nop_endif
 
 	.macro	kernel_exit, el
 	.if	\el != 0
-	disable_daif	// 禁用 DAIF
+	disable_daif	// 退出到el1需禁用 DAIF
 	.endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
@@ -517,6 +517,7 @@ alternative_else_nop_endif
 	 * feature as all TTBR0_EL1 accesses are disabled, not just those to
 	 * user mappings.
 	 */
+	 // 进入内核disable用户空间页表寄存器
 SYM_CODE_START_LOCAL(__swpan_entry_el1)
 	mrs	x21, ttbr0_el1
 	tst	x21, #TTBR_ASID_MASK		// Check for the reserved ASID
@@ -532,6 +533,7 @@ SYM_CODE_END(__swpan_entry_el1)
 	 * Restore access to TTBR0_EL1. If returning to EL0, no need for SPSR
 	 * PAN bit checking.
 	 */
+	 // 软件模拟PAN是通过修改用户态页表阻止内核访问用户空间数据，退出内核态时需要恢复用户空间页表寄存器
 SYM_CODE_START_LOCAL(__swpan_exit_el1)
 	tbnz	x22, #22, 1f			// Skip re-enabling TTBR0 access if the PSR_PAN_BIT is set
 	__uaccess_ttbr0_enable x0, x1
@@ -634,7 +636,7 @@ SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
 	mov	x0, sp
 	bl	el\el\ht\()_\regsize\()_\label\()_handler
-	.if \el == 0
+	.if \el == 0	// 表示系统调用或者用户态触发的异常
 	b	ret_to_user
 	.else
 	b	ret_to_kernel
@@ -674,7 +676,7 @@ SYM_CODE_END(ret_to_kernel)
 
 SYM_CODE_START_LOCAL(ret_to_user)
 	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
-	enable_step_tsk x19, x2
+	enable_step_tsk x19, x2			// 如果用户态单步调试，需要恢复
 #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
 	bl	stackleak_erase_on_task_stack
 #endif
