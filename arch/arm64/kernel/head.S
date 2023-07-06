@@ -515,7 +515,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	str_l	x4, kimage_voffset, x5		// physical mappings
 
 	mov	x0, x20
-	bl	set_cpu_boot_mode_flag
+	bl	set_cpu_boot_mode_flag		// cpu boot mode保存到全局变量
 
 	// Clear BSS
 	adr_l	x0, __bss_start
@@ -898,8 +898,8 @@ SYM_FUNC_END(__relocate_kernel)
 #endif
 
 SYM_FUNC_START_LOCAL(__primary_switch)
-	adrp	x1, reserved_pg_dir			// 保留页表, 用于内核访问user space
-	adrp	x2, init_idmap_pg_dir		// 全局页表
+	adrp	x1, reserved_pg_dir			// 保留页表, 用于内核访问user space, SW PAN功能，内核把ttbr0设置为这个页表
+	adrp	x2, init_idmap_pg_dir		// 全局页表 identity mapping
 	bl	__enable_mmu					// 设置页表寄存器, 把x0写入系统控制寄存器, mmu on已打开
 #ifdef CONFIG_RELOCATABLE
 	adrp	x23, KERNEL_START			// 取 _text 4K对齐地址
@@ -922,7 +922,7 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 
 	// 重新加载页表
 	// 因为刚刚的页表是虚地址和物理地址一一对应的方式映射, 需要改成内核在高地址空间, 所以需要重新设置页表
-	adrp	x1, init_pg_dir
+	adrp	x1, init_pg_dir				// 全局页表，内核位于高地址
 	load_ttbr1 x1, x1, x2
 #ifdef CONFIG_RELOCATABLE
 	bl	__relocate_kernel	// 重定位
