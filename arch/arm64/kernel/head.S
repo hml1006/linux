@@ -435,7 +435,7 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	cbnz	x19, 0f				// skip cache invalidation if MMU is on
 	dmb	sy	// 系统级屏障
 
-	// clean & invalidate 全局页表
+	// clean & invalidate 全局identity mapping页表，flush动作，清L1 dcache
 	adrp	x0, init_idmap_pg_dir
 	adrp	x1, init_idmap_pg_end
 	bl	dcache_inval_poc	// clean & invalidate dcache
@@ -447,7 +447,7 @@ SYM_FUNC_START_LOCAL(create_kernel_mapping)
 	adrp	x0, init_pg_dir
 	mov_q	x5, KIMAGE_VADDR		// compile time __va(_text)
 #ifdef CONFIG_RELOCATABLE
-	add	x5, x5, x23			// add KASLR displacement
+	add	x5, x5, x23			// add KASLR displacement，x23保存内核地址随机化offset，重新映射kernel地址需要把这个offset加上
 #endif
 	adrp	x6, _end			// runtime __pa(_end)
 	adrp	x3, _text			// runtime __pa(_text)
@@ -648,7 +648,7 @@ SYM_FUNC_START(secondary_holding_pen)
 	and	x2, x2, x1
 	adr_l	x3, secondary_holding_pen_release
 pen:	ldr	x4, [x3]
-	cmp	x4, x2
+	cmp	x4, x2				// 比较待启动CPU id，core0初始化完系统后需要启动其他core
 	b.eq	secondary_startup
 	wfe
 	b	pen
@@ -658,7 +658,7 @@ SYM_FUNC_END(secondary_holding_pen)
 	 * Secondary entry point that jumps straight into the kernel. Only to
 	 * be used where CPUs are brought online dynamically by the kernel.
 	 */
-SYM_FUNC_START(secondary_entry)	// cpu低功耗相关
+SYM_FUNC_START(secondary_entry)	// Power State Coordination Interface,功耗节能热插拔模块调用此函数启动cpu
 	mov	x0, xzr
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	b	secondary_startup
@@ -669,7 +669,7 @@ SYM_FUNC_START_LOCAL(secondary_startup)
 	 * Common entry point for secondary CPUs.
 	 */
 	mov	x20, x0				// preserve boot mode
-	bl	__cpu_secondary_check52bitva
+	bl	__cpu_secondary_check52bitva	// 检查是否支持52位虚地址
 #if VA_BITS > 48
 	ldr_l	x0, vabits_actual
 #endif
@@ -684,13 +684,13 @@ SYM_FUNC_END(secondary_startup)
 	.text
 SYM_FUNC_START_LOCAL(__secondary_switched)
 	mov	x0, x20
-	bl	set_cpu_boot_mode_flag
+	bl	set_cpu_boot_mode_flag			// 设置cpu boot flag
 
 	mov	x0, x20
 	bl	finalise_el2
 
 	str_l	xzr, __early_cpu_boot_status, x3
-	adr_l	x5, vectors
+	adr_l	x5, vectors				// 设置中断向量表
 	msr	vbar_el1, x5
 	isb
 
@@ -736,7 +736,7 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  *  - Writes 'status' to __early_cpu_boot_status and makes sure
  *    it is committed to memory.
  */
-
+// cpu boot失败，记录失败原因到变量
 	.macro	update_early_cpu_boot_status status, tmp1, tmp2
 	mov	\tmp2, #\status
 	adr_l	\tmp1, __early_cpu_boot_status
@@ -775,7 +775,7 @@ SYM_FUNC_START(__enable_mmu)
 	ret
 SYM_FUNC_END(__enable_mmu)
 
-SYM_FUNC_START(__cpu_secondary_check52bitva)
+SYM_FUNC_START(__cpu_secondary_check52bitva)	// 对比cpu0初始化时的VA地址是否支持
 #if VA_BITS > 48
 	ldr_l	x0, vabits_actual
 	cmp	x0, #52
@@ -905,14 +905,15 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	adrp	x23, KERNEL_START			// 取 _text 4K对齐地址
 	and	x23, x23, MIN_KIMG_ALIGN - 1
 #ifdef CONFIG_RANDOMIZE_BASE
-	mov	x0, x22
+	mov	x0, x22				// x22, FDT blob identity mapping虚地址
 	adrp	x1, init_pg_end
 	mov	sp, x1
 	mov	x29, xzr
-	bl	__pi_kaslr_early_init
+	// arch/arm64/kernel/pi/kaslr_early.c
+	bl	__pi_kaslr_early_init		// 生成random seed，使用该seed随机化内核load地址，避免利用已知内核内存布局攻击
 	and	x24, x0, #SZ_2M - 1		// capture memstart offset seed
 	bic	x0, x0, #SZ_2M - 1
-	orr	x23, x23, x0			// record kernel offset
+	orr	x23, x23, x0			// record kernel offset， x23 存放内核地址随机化 offset
 #endif
 #endif
 	// 清空旧内核image页表

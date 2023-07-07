@@ -64,7 +64,7 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	/* 2^7 对齐，align伪指令在x86和arm不一样 */
 	.align 7
 .Lventry_start\@:
-	.if	\el == 0
+	.if	\el == 0	// 中断来自user space
 	/*
 	 * This must be the first instruction of the EL0 vector entries. It is
 	 * skipped by the trampoline vectors, to trigger the cleanup.
@@ -569,34 +569,35 @@ tsk	.req	x28		// current thread_info
 如果发生异常导致了exception level切换，并且发生异常之前的exception level运行在AARCH32模式，那么使用第四组异常向量表。用户态跑的aarch32程序，执行了系统调用
 **/
 /**
-el1_sync：当前处于内核态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）。
-el1_irq：当前处于内核态时，发生硬件中断。
-el0_sync：当前处于用户态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）、系统调用。
-el0_irq：当前处于用户态时，发生了硬件中断。
+el1 sync：当前处于内核态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）。
+el1 irq：当前处于内核态时，发生硬件中断。
+el0 sync：当前处于用户态时，发生了指令执行异常、缺页中断（跳转地址或者取地址）、系统调用。
+el0 irq：当前处于用户态时，发生了硬件中断。
 **/
 /**
 fiq 快速中断在secure world中使用, 即el3
 **/
+// h - handler, t - thread
 	.align	11
 SYM_CODE_START(vectors)
-	kernel_ventry	1, t, 64, sync		// Synchronous EL1t			// 不可用
-	kernel_ventry	1, t, 64, irq		// IRQ EL1t					// 不可用
-	kernel_ventry	1, t, 64, fiq		// FIQ EL1t					// 不可用
-	kernel_ventry	1, t, 64, error		// Error EL1t				// 不可用
+	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
+	kernel_ventry	1, t, 64, irq		// IRQ EL1t
+	kernel_ventry	1, t, 64, fiq		// FIQ EL1t
+	kernel_ventry	1, t, 64, error		// Error EL1t
 
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
 	kernel_ventry	1, h, 64, irq		// IRQ EL1h
-	kernel_ventry	1, h, 64, fiq		// FIQ EL1h					// 不可用
+	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
 
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
-	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0			// 不可用
+	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
 
 	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
 	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0
-	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0			// 不可用
+	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
 	kernel_ventry	0, t, 32, error		// Error 32-bit EL0
 SYM_CODE_END(vectors)
 
