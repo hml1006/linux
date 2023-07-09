@@ -69,10 +69,10 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 * This must be the first instruction of the EL0 vector entries. It is
 	 * skipped by the trampoline vectors, to trigger the cleanup.
 	 */
-	b	.Lskip_tramp_vectors_cleanup\@
+	b	.Lskip_tramp_vectors_cleanup\@	// 从tramp_vector跳转过来时, 这条指令会被跳过, x30 LR寄存器地址被设置为了下一条指令
 	.if	\regsize == 64
 	/*
-	* 备份tpidrro_el0到x30寄存器，然后清0,tpidrro_el0寄存器一般用于实现thread local storage
+	* tramp_entry中会把x30备份到tpidrro_el0, 此处恢复x30, x30是LR寄存器
 	*/
 	mrs	x30, tpidrro_el0
 	msr	tpidrro_el0, xzr
@@ -92,11 +92,10 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 */
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
-	tbnz	x0, #THREAD_SHIFT, 0f	// 检查sp地址是否 thread shift（一般page size）对齐, 如果是, 则and运算结果为0
+	tbnz	x0, #THREAD_SHIFT, 0f	// ==page_shift==12, 当sp溢出量在一个page内时,page_shift bit为1,如果没有溢出,这个bit为0
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
 
-	// arch/arm64/kernel/entry-common.c  异常处理程序位置
 	b	el\el\ht\()_\regsize\()_\label	// entry_handler
 
 0:
@@ -107,14 +106,14 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 */
 
 	/* Stash the original SP (minus PT_REGS_SIZE) in tpidr_el0. */
-	msr	tpidr_el0, x0
+	msr	tpidr_el0, x0			// x0备份到tpidr_el0, 此时x0的值等于sp初始值
 
 	/* Recover the original x0 value and stash it in tpidrro_el0 */
-	sub	x0, sp, x0
-	msr	tpidrro_el0, x0
+	sub	x0, sp, x0				// 恢复x0的原始值
+	msr	tpidrro_el0, x0			// x0备份到tpidrro_el0
 
 	/* Switch to the overflow stack */
-	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0
+	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0	// 取per-cpu over_flow_stack栈地址,设置到sp
 
 	/*
 	 * Check whether we were already on the overflow stack. This may happen
@@ -122,7 +121,8 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 */
 	mrs	x0, tpidr_el0			// sp of interrupted context
 	sub	x0, sp, x0			// delta with top of overflow stack
-	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?
+	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?  判断interrupted sp和overflow_stack sp的偏移是否在overflow stack size内
+										// 为0则说明之前的sp在overflow stack地址范围
 	b.ne	__bad_stack			// no? -> bad stack pointer
 
 	/* We were already on the overflow stack. Restore sp/x0 and carry on. */
@@ -633,10 +633,10 @@ SYM_CODE_END(__bad_stack)
 
 
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
-SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
-	kernel_entry \el, \regsize
+SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)		// kernel_ventry会跳转到此处执行
+	kernel_entry \el, \regsize								// 备份通用寄存器, 部分初始化操作
 	mov	x0, sp
-	bl	el\el\ht\()_\regsize\()_\label\()_handler
+	bl	el\el\ht\()_\regsize\()_\label\()_handler			// 跳转到handler执行
 	.if \el == 0	// 表示系统调用或者用户态触发的异常
 	b	ret_to_user
 	.else
@@ -688,10 +688,10 @@ SYM_CODE_END(ret_to_user)
 
 	// Move from tramp_pg_dir to swapper_pg_dir
 	.macro tramp_map_kernel, tmp
-	mrs	\tmp, ttbr1_el1
-	add	\tmp, \tmp, #TRAMP_SWAPPER_OFFSET
-	bic	\tmp, \tmp, #USER_ASID_FLAG
-	msr	ttbr1_el1, \tmp
+	mrs	\tmp, ttbr1_el1						// 取出当前内核页表寄存器
+	add	\tmp, \tmp, #TRAMP_SWAPPER_OFFSET	// 偏移到swapper_pg_dir
+	bic	\tmp, \tmp, #USER_ASID_FLAG			// 清掉user asid flag
+	msr	ttbr1_el1, \tmp						// 重置到swapper_pg_dir
 #ifdef CONFIG_QCOM_FALKOR_ERRATUM_1003
 alternative_if ARM64_WORKAROUND_QCOM_FALKOR_E1003
 	/* ASID already in \tmp[63:48] */
@@ -721,12 +721,12 @@ alternative_else_nop_endif
 
 	.macro		tramp_data_read_var	dst, var
 #ifdef CONFIG_RELOCATABLE
-	ldr		\dst, .L__tramp_data_\var
+	ldr		\dst, .L__tramp_data_\var			// 这个label保存了vectors中断向量表的地址
 	.ifndef		.L__tramp_data_\var
 	.pushsection	".entry.tramp.rodata", "a", %progbits
 	.align		3
 .L__tramp_data_\var:
-	.quad		\var
+	.quad		\var							// 声明一个64位变量, 值为vectors
 	.popsection
 	.endif
 #else
@@ -744,10 +744,11 @@ alternative_else_nop_endif
 #endif
 	.endm
 
+// Branch Target Buffer Hardening, 分支预测漏洞会导致缓存穿透
 #define BHB_MITIGATION_NONE	0
-#define BHB_MITIGATION_LOOP	1
-#define BHB_MITIGATION_FW	2
-#define BHB_MITIGATION_INSN	3
+#define BHB_MITIGATION_LOOP	1	// 循环中包含间接分支时,使用循环缓冲器缓解BHB漏洞
+#define BHB_MITIGATION_FW	2	// firmware+hardware修复
+#define BHB_MITIGATION_INSN	3	// 内核指令级修复
 
 	.macro tramp_ventry, vector_start, regsize, kpti, bhb
 	.align	7
@@ -776,16 +777,16 @@ alternative_else_nop_endif
 	 * enter the full-fat kernel vectors.
 	 */
 	bl	2f
-	b	.
+	b	.							// 因为x30返回地址会被修改, 所以此处不会执行
 2:
-	tramp_map_kernel	x30
+	tramp_map_kernel	x30			// 从tramp_pg_dir切换到swapper_pg_dir,cpu处于el0时内核页表是tramp_pg_dir
 alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
-	tramp_data_read_var	x30, vectors
+	tramp_data_read_var	x30, vectors	// 取中断向量表地址放入x30
 alternative_if_not ARM64_WORKAROUND_CAVIUM_TX2_219_PRFM
 	prfm	plil1strm, [x30, #(1b - \vector_start)]
 alternative_else_nop_endif
 
-	msr	vbar_el1, x30
+	msr	vbar_el1, x30				// 把vectors地址放入中断向量表寄存器
 	isb
 	.else
 	adr_l	x30, vectors
@@ -800,8 +801,8 @@ alternative_else_nop_endif
 	__mitigate_spectre_bhb_fw
 	.endif // \bhb == BHB_MITIGATION_FW
 
-	add	x30, x30, #(1b - \vector_start + 4)
-	ret
+	add	x30, x30, #(1b - \vector_start + 4)		// x30存放当前entry第二条指令相对于generate_tramp_vector起始地址的偏移
+	ret											// 返回到vectors中断向量表, x30地址, 并且会跳过第一条指令, 因为上面加4了
 .org 1b + 128	// Did we overflow the ventry slot?
 	.endm
 
@@ -823,12 +824,12 @@ alternative_else_nop_endif
 
 	.macro	generate_tramp_vector,	kpti, bhb
 .Lvector_start\@:
-	.space	0x400
+	.space	0x400					// 空出8个entry, 这段属于el1t, el1h, 只有el0t, el0t 32才需要,也就是el0切el1才需要tramp_vector
 
-	.rept	4
+	.rept	4						// 此处是el0t的4个entry, repeat 4次
 	tramp_ventry	.Lvector_start\@, 64, \kpti, \bhb
 	.endr
-	.rept	4
+	.rept	4						// 此处是el0t_32的4个entry
 	tramp_ventry	.Lvector_start\@, 32, \kpti, \bhb
 	.endr
 	.endm
@@ -864,6 +865,7 @@ SYM_CODE_END(tramp_exit_compat)
  * Exception vectors for spectre mitigations on entry from EL1 when
  * kpti is not in use.
  */
+ // 未开启内核页表隔离时的缓解幽灵漏洞方案, 对el0系统调用和异常做tramp
 	.macro generate_el1_vector, bhb
 .Lvector_start\@:
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
@@ -887,7 +889,7 @@ SYM_CODE_END(tramp_exit_compat)
 /* The order must match tramp_vecs and the arm64_bp_harden_el1_vectors enum. */
 	.pushsection ".entry.text", "ax"
 	.align	11
-SYM_CODE_START(__bp_harden_el1_vectors)
+SYM_CODE_START(__bp_harden_el1_vectors)	// 三张中断向量表
 #ifdef CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY
 	generate_el1_vector	bhb=BHB_MITIGATION_LOOP
 	generate_el1_vector	bhb=BHB_MITIGATION_FW

@@ -25,18 +25,18 @@ primary_entry
  -->init_kernel_el<初始化CPU boot mode，EL1还是EL2,检查是否支持VHE虚拟化等>  
  -->__cpu_setup<enable FP/SIMD,debug pmu访问权限，mair寄存器内存属性设置，页表和内存调试功能Feature设置，虚地址物理地址bit长度设置>  
  -->__primary_switch  
-  -->__enable_mmu<使能mmu>  
-  -->__pi_kaslr_early_init<传入FDT地址，从FDT读取seed并生成一个offset>
-  -->clear_page_tables<清空旧的页表>
-  -->create_kernel_mapping<创建新的内核页表，内核位于高地址空间>
-  -->__relocate_kernel<重定位 .rel.dyn段>  
-  -->__primary_switched  
-   -->init_cpu_task  
-   -->设置中断向量表，取__fdt_pointer和内核镜像地址
-   -->set_cpu_boot_mode_flag<把CPU boot mode保存到全局变量>
-   -->清bss段
-   -->kasan_early_init<kasan功能初步初始化，arm64 MTE Feature可硬件支持kasan>
-   -->early_fdt_map<尝试remap fdt，可能失败>  
-   -->init_feature_override<读取代码中的配置并初始化cpu Feature>  
-   -->start_kernel  
+    -->__enable_mmu<使能mmu>  
+    -->__pi_kaslr_early_init<传入FDT地址，从FDT读取seed并生成一个offset>
+    -->clear_page_tables<清空旧的页表>
+    -->create_kernel_mapping<创建新的内核页表，内核位于高地址空间>
+    -->__relocate_kernel<重定位 .rel.dyn段>  
+    -->__primary_switched  
+       -->init_cpu_task  
+       -->设置中断向量表，取__fdt_pointer和内核镜像地址
+       -->set_cpu_boot_mode_flag<把CPU boot mode保存到全局变量>
+       -->清bss段
+       -->kasan_early_init<kasan功能初步初始化，arm64 MTE Feature可硬件支持kasan>
+       -->early_fdt_map<尝试remap fdt，可能失败>  
+       -->init_feature_override<读取代码中的配置并初始化cpu Feature>  
+       -->start_kernel  
 ```
