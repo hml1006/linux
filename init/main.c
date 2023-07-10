@@ -949,9 +949,9 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
-	// 设置栈溢出magic number
+	// 设置栈溢出magic number, 在栈顶端设置一个magic, 如果被改, 说明溢出
 	set_task_stack_end_magic(&init_task);
-	// 获取smp处理器id，x86为空
+	// 获取smp处理器id，设置logical cpu map
 	smp_setup_processor_id();
 	// 初始化obj_hash、obj_static_pool这2个全局变量，这2个全局变量会在调试的时候用到
 	debug_objects_early_init();

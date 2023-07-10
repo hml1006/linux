@@ -2,6 +2,7 @@
 
 ```
 SYM_CODE_START(vectors)
+// el1t， linux未处理，正常不会进入
     kernel_ventry    1, t, 64, sync        // Synchronous EL1t
     kernel_ventry    1, t, 64, irq        // IRQ EL1t
     kernel_ventry    1, t, 64, fiq        // FIQ EL1t
@@ -89,3 +90,24 @@ kernel_ventry
     -->检查sp是否溢出<vmap stack>
     -->跳转到entry_handler宏执行
 ```
+
+**entry_handler执行流程**
+
+entry_handler是个macro，代码中定义了 el\el\ht\()_\regsize\()_\label 这些函数，kernel_ventry就是跳转到这几个函数。
+
+```
+	.macro entry_handler el:req, ht:req, regsize:req, label:req
+SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)		// kernel_ventry会跳转到此处执行
+	kernel_entry \el, \regsize								// 备份通用寄存器, 部分初始化操作
+	mov	x0, sp
+	bl	el\el\ht\()_\regsize\()_\label\()_handler			// 跳转到handler执行
+	.if \el == 0	// 表示系统调用或者用户态触发的异常
+	b	ret_to_user
+	.else
+	b	ret_to_kernel
+	.endif
+SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
+	.endm
+```
+
+> entry_handler先执行kernel_entry, kernel_entry主要功能是保存通用寄存器和切堆栈，然后是MTE和ptr auth设置。之后跳转到c代码el\el\ht()_\regsize()_\label()_handler
