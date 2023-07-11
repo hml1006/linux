@@ -971,7 +971,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 */
 	// 设置boot cpu标记
 	boot_cpu_init();
-	// 初始化high memory页表
+	// 初始化high memory页表, 64位为空
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	// 安全模块初始化
