@@ -88,7 +88,9 @@ u64 __cacheline_aligned boot_args[4];
 
 void __init smp_setup_processor_id(void)
 {
+	// 从mpidr寄存器读取attr 0，1，2，3, 包含cluster id，cpuid
 	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
+	// 把读取的CPU id设置到 CPU logical map
 	set_cpu_logical_map(0, mpidr);
 
 	pr_info("Booting Linux on physical CPU 0x%010lx [0x%08x]\n",
@@ -292,6 +294,7 @@ u64 cpu_logical_map(unsigned int cpu)
 
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
+	// 初始化起始内存管理器结构体
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
 
 	*cmdline_p = boot_command_line;
@@ -303,9 +306,11 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	arm64_use_ng_mappings = kaslr_requires_kpti();
 
+	// 初始化fixmap页表，设备树中间level entry，叶子entry在下面初始化
 	early_fixmap_init();
 	early_ioremap_init();
 
+	// 设备树最后一个页表level entry初始化
 	setup_machine_fdt(__fdt_pointer);
 
 	/*

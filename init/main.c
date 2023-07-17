@@ -955,7 +955,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	smp_setup_processor_id();
 	// 初始化obj_hash、obj_static_pool这2个全局变量，这2个全局变量会在调试的时候用到
 	debug_objects_early_init();
-	// 计算隐藏内核build id
+	// 从 .note section找到build id
 	init_vmlinux_build_id();
 
 	// 初始化cgroups
