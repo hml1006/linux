@@ -1216,11 +1216,14 @@ void __init early_fixmap_init(void)
 	pmd_t *pmdp;
 	unsigned long addr = FIXADDR_START;
 
+	//一级页表entry地址
 	pgdp = pgd_offset_k(addr);
+	// 如果是5级页表，pgd和pud之间增加了一个p4d, 否则 pgdp == p4dp
 	p4dp = p4d_offset(pgdp, addr);
 	p4d = READ_ONCE(*p4dp);
 	if (CONFIG_PGTABLE_LEVELS > 3 &&
 	    !(p4d_none(p4d) || p4d_page_paddr(p4d) == __pa_symbol(bm_pud))) {
+		// 16K 4级页表
 		/*
 		 * We only end up here if the kernel mapping and the fixmap
 		 * share the top level pgd entry, which should only happen on
@@ -1229,6 +1232,7 @@ void __init early_fixmap_init(void)
 		BUG_ON(!IS_ENABLED(CONFIG_ARM64_16K_PAGES));
 		pudp = pud_offset_kimg(p4dp, addr);
 	} else {
+		//检查下一级页表是否空，空需要分配构造页表
 		if (p4d_none(p4d))
 			__p4d_populate(p4dp, __pa_symbol(bm_pud), P4D_TYPE_TABLE);
 		pudp = fixmap_pud(addr);
