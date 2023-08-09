@@ -814,17 +814,17 @@ SYM_FUNC_START_LOCAL(__relocate_kernel)
 	adr_l	x9, __rela_start
 	adr_l	x10, __rela_end
 	mov_q	x11, KIMAGE_VADDR		// default virtual offset
-	add	x11, x11, x23			// actual virtual offset
+	add	x11, x11, x23			// actual virtual offset, x23保存了之前计算的kernel随机空间地址偏移
 
-// 循环修正 .rel section
+// 循环修正 .rela section
 0:	cmp	x9, x10
-	b.hs	1f
-	ldp	x12, x13, [x9], #24
-	ldr	x14, [x9, #-8]
-	cmp	w13, #R_AARCH64_RELATIVE
+	b.hs	1f					// 判断使用的是 .rela还是 .relr section
+	ldp	x12, x13, [x9], #24		// offset(重定位位置偏移), info(.dynsym符号索引，重定位类型), addend(加数), 每个8字节
+	ldr	x14, [x9, #-8]			// 此时 x12 - offset, x13 - info, x14 - addend
+	cmp	w13, #R_AARCH64_RELATIVE	// 检查重定位类型
 	b.ne	0b
-	add	x14, x14, x23			// relocate
-	str	x14, [x12, x23]
+	add	x14, x14, x23			// relocate, addend加上kernel随机偏移
+	str	x14, [x12, x23]			// 把重定位应用到offset
 	b	0b
 
 1:
