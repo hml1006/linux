@@ -90,9 +90,11 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 * Task and IRQ stacks are aligned so that SP & (1 << THREAD_SHIFT)
 	 * should always be zero.
 	 */
+	// vmap stack 分配栈，在栈的起始会分配一个保护页，stack是32K对齐，目的是 SP & (1 << THREAD_SHIFT) 这种简单方法检查溢出
+	// 保护页不映射物理内存，但是占用虚地址空间，如果踩到保护页会产生内存错误，进入本中断向量进行检查处理
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
-	tbnz	x0, #THREAD_SHIFT, 0f	// ==page_shift==12, 当sp溢出量在一个page内时,page_shift bit为1,如果没有溢出,这个bit为0
+	tbnz	x0, #THREAD_SHIFT, 0f	// ==THREAD_SHIFT==14, 当sp溢出时,THREAD_SHIFT bit为1,如果没有溢出,这个bit为0
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
 
@@ -113,14 +115,14 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	msr	tpidrro_el0, x0			// x0备份到tpidrro_el0
 
 	/* Switch to the overflow stack */
-	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0	// 取per-cpu over_flow_stack栈地址,设置到sp
+	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0	// 取per-cpu over_flow_stack栈地址,设置到sp，主栈满了，切到备用栈
 
 	/*
 	 * Check whether we were already on the overflow stack. This may happen
 	 * after panic() re-enables interrupts.
 	 */
 	mrs	x0, tpidr_el0			// sp of interrupted context
-	sub	x0, sp, x0			// delta with top of overflow stack
+	sub	x0, sp, x0			// delta with top of overflow stack, 计算主栈和备用栈的地址偏移
 	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?  判断interrupted sp和overflow_stack sp的偏移是否在overflow stack size内
 										// 为0则说明之前的sp在overflow stack地址范围
 	b.ne	__bad_stack			// no? -> bad stack pointer
