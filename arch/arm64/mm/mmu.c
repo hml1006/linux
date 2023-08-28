@@ -1216,7 +1216,7 @@ void __init early_fixmap_init(void)
 	pmd_t *pmdp;
 	unsigned long addr = FIXADDR_START;
 
-	//一级页表entry地址
+	//一级页表entry地址， L0
 	pgdp = pgd_offset_k(addr);
 	// 如果是5级页表，pgd和pud之间增加了一个p4d, 否则 pgdp == p4dp
 	p4dp = p4d_offset(pgdp, addr);
@@ -1232,13 +1232,16 @@ void __init early_fixmap_init(void)
 		BUG_ON(!IS_ENABLED(CONFIG_ARM64_16K_PAGES));
 		pudp = pud_offset_kimg(p4dp, addr);
 	} else {
-		//检查下一级页表是否空，空需要分配构造页表
+		//检查下一级页表是否空，空需要分配构造页表, L1
 		if (p4d_none(p4d))
 			__p4d_populate(p4dp, __pa_symbol(bm_pud), P4D_TYPE_TABLE);
+		// 计算pud地址， L2
 		pudp = fixmap_pud(addr);
 	}
+	// 填充pud, L2
 	if (pud_none(READ_ONCE(*pudp)))
 		__pud_populate(pudp, __pa_symbol(bm_pmd), PUD_TYPE_TABLE);
+	// 填充pmd， L3
 	pmdp = fixmap_pmd(addr);
 	__pmd_populate(pmdp, __pa_symbol(bm_pte), PMD_TYPE_TABLE);
 

@@ -1,5 +1,5 @@
 **idmap_pg_dir**是identity mapping使用的页表。
-**swapper_pg_dir**是kernel image mapping初始阶段使用的页表。
+**swapper_pg_dir**是kernel image mapping初始阶段使用的页表。pgd地址默认初始化为这个值。
 
 **init_idmap_pg_dir**是identity mapping全局页表，会加载到页表寄存器。
 

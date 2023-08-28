@@ -444,14 +444,19 @@ SYM_FUNC_END(create_idmap)
 
 // 根据新的内核虚地址创建页表
 SYM_FUNC_START_LOCAL(create_kernel_mapping)
-	adrp	x0, init_pg_dir
+	adrp	x0, init_pg_dir			// 全局ba页表地址
+	// 内核映射虚地址起始地址
 	mov_q	x5, KIMAGE_VADDR		// compile time __va(_text)
 #ifdef CONFIG_RELOCATABLE
 	add	x5, x5, x23			// add KASLR displacement，x23保存内核地址随机化offset，重新映射kernel地址需要把这个offset加上
 #endif
+	// 内核image 末尾地址， page对齐
 	adrp	x6, _end			// runtime __pa(_end)
+	// 内核image 起始地址
 	adrp	x3, _text			// runtime __pa(_text)
+	// 内核image 长度
 	sub	x6, x6, x3			// _end - _text
+	// 内核image 末尾虚地址
 	add	x6, x6, x5			// runtime __va(_end)
 	mov	x7, SWAPPER_RW_MMUFLAGS
 

@@ -19,7 +19,7 @@ start_kernel
     -->early_security_init<初期安全模块初始化>
     -->setup_arch<体系结构相关初始化>
         -->setup_initial_init_mm<初始化init 内存管理器>
-        -->early_fixmap_init<>
+        -->early_fixmap_init<初始化L0, L1, L2 fixmap区域对应的页表entry>
 ```
 
 

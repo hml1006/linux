@@ -186,12 +186,15 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size;
+	// 把 fdt 物理地址映射到虚地址
 	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
 	const char *name;
 
+	// 把 fdt 物理地址空间添加到memblock的保留区域，防止被破坏
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
 
+	// 校验设备树，扫描设备
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
 			"Error: invalid device tree blob at physical address %pa (virtual address 0x%px)\n"
@@ -306,8 +309,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	arm64_use_ng_mappings = kaslr_requires_kpti();
 
-	// 初始化fixmap页表，设备树中间level entry，叶子entry在下面初始化
+	// 初始化fixmap页表，设备树中间level entry L0, L1, L2，叶子 L3 entry在下面初始化
 	early_fixmap_init();
+	// 初始化 7 个虚地址slot，每个 slot 指向一段 fixmap区域
 	early_ioremap_init();
 
 	// 设备树最后一个页表level entry初始化
