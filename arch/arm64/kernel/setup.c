@@ -88,7 +88,7 @@ u64 __cacheline_aligned boot_args[4];
 
 void __init smp_setup_processor_id(void)
 {
-	// 从mpidr寄存器读取attr 0，1，2，3, 包含cluster id，cpuid
+	// 从mpidr寄存器读取aff 3，2，1，0，aff2,1为两级clusterID，aff1为cpuid， aff0为threadid(如果不是一个core支持几个thread core<比如双核心四线程>，值为0)
 	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
 	// 把读取的CPU id设置到 CPU logical map
 	set_cpu_logical_map(0, mpidr);

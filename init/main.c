@@ -908,10 +908,10 @@ void start_kernel(void)
 	// 设置 nr_cpu_ids 变量
 	setup_nr_cpu_ids();
 	// 给每个CPU分配内存，拷贝.data.percpu段的数据. 为系统中的每个CPU的per_cpu变量申请空间
-	// per cpu 变量访问方式为gs:ptr, 每个cpu的per cpu变量地址放gs寄存器
+	// per cpu 变量访问方式为x86 gs:ptr, 每个cpu的per cpu变量地址放gs寄存器, arm64 TPDIR_EL1寄存器放基址
 	setup_per_cpu_areas();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
-	// 设置启动过的CPU标识
+	// 设置boot cpu 状态
 	boot_cpu_hotplug_init();
 
 	pr_notice("Kernel command line: %s\n", saved_command_line);
