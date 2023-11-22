@@ -11070,7 +11070,7 @@ ctrl_power_mode(struct drx_demod_instance *demod, enum drx_power_mode *mode)
 		sio_cc_pwd_mode = SIO_CC_PWD_MODE_LEVEL_OSC;
 		break;
 	default:
-		/* Unknow sleep mode */
+		/* Unknown sleep mode */
 		return -EINVAL;
 	}
 
@@ -12372,7 +12372,7 @@ error:
 
 	return NULL;
 }
-EXPORT_SYMBOL(drx39xxj_attach);
+EXPORT_SYMBOL_GPL(drx39xxj_attach);
 
 static const struct dvb_frontend_ops drx39xxj_ops = {
 	.delsys = { SYS_ATSC, SYS_DVBC_ANNEX_B },

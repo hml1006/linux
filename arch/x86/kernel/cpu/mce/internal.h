@@ -157,6 +157,9 @@ struct mce_vendor_flags {
 	 */
 	smca			: 1,
 
+	/* Zen IFU quirk */
+	zen_ifu_quirk		: 1,
+
 	/* AMD-style error thresholding banks present. */
 	amd_threshold		: 1,
 
@@ -172,7 +175,7 @@ struct mce_vendor_flags {
 	/* Skylake, Cascade Lake, Cooper Lake REP;MOVS* quirk */
 	skx_repmov_quirk	: 1,
 
-	__reserved_0		: 56;
+	__reserved_0		: 55;
 };
 
 extern struct mce_vendor_flags mce_flags;
@@ -244,11 +247,11 @@ noinstr void pentium_machine_check(struct pt_regs *regs);
 noinstr void winchip_machine_check(struct pt_regs *regs);
 static inline void enable_p5_mce(void) { mce_p5_enabled = 1; }
 #else
-static inline void intel_p5_mcheck_init(struct cpuinfo_x86 *c) {}
-static inline void winchip_mcheck_init(struct cpuinfo_x86 *c) {}
-static inline void enable_p5_mce(void) {}
-static inline void pentium_machine_check(struct pt_regs *regs) {}
-static inline void winchip_machine_check(struct pt_regs *regs) {}
+static __always_inline void intel_p5_mcheck_init(struct cpuinfo_x86 *c) {}
+static __always_inline void winchip_mcheck_init(struct cpuinfo_x86 *c) {}
+static __always_inline void enable_p5_mce(void) {}
+static __always_inline void pentium_machine_check(struct pt_regs *regs) {}
+static __always_inline void winchip_machine_check(struct pt_regs *regs) {}
 #endif
 
 noinstr u64 mce_rdmsrl(u32 msr);
@@ -274,4 +277,5 @@ static __always_inline u32 mca_msr_reg(int bank, enum mca_msr reg)
 	return 0;
 }
 
+extern void (*mc_poll_banks)(void);
 #endif /* __X86_MCE_INTERNAL_H__ */

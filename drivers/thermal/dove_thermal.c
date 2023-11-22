@@ -87,15 +87,12 @@ static int dove_get_temp(struct thermal_zone_device *thermal,
 			  int *temp)
 {
 	unsigned long reg;
-	struct dove_thermal_priv *priv = thermal->devdata;
+	struct dove_thermal_priv *priv = thermal_zone_device_priv(thermal);
 
 	/* Valid check */
 	reg = readl_relaxed(priv->control + PMU_TEMP_DIOD_CTRL1_REG);
-	if ((reg & PMU_TDC1_TEMP_VALID_MASK) == 0x0) {
-		dev_err(&thermal->device,
-			"Temperature sensor reading not valid\n");
+	if ((reg & PMU_TDC1_TEMP_VALID_MASK) == 0x0)
 		return -EIO;
-	}
 
 	/*
 	 * Calculate temperature. According to Marvell internal
@@ -142,8 +139,8 @@ static int dove_thermal_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	thermal = thermal_zone_device_register("dove_thermal", 0, 0,
-					       priv, &ops, NULL, 0, 0);
+	thermal = thermal_tripless_zone_device_register("dove_thermal", priv,
+							&ops, NULL);
 	if (IS_ERR(thermal)) {
 		dev_err(&pdev->dev,
 			"Failed to register thermal zone device\n");

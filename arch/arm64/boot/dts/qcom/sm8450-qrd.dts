@@ -18,6 +18,7 @@
 / {
 	model = "Qualcomm Technologies, Inc. SM8450 QRD";
 	compatible = "qcom,sm8450-qrd", "qcom,sm8450";
+	chassis-type = "handset";
 
 	aliases {
 		serial0 = &uart7;
@@ -282,7 +283,6 @@
 			regulator-max-microvolt = <912000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
-
 	};
 
 	regulators-3 {

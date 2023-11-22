@@ -84,7 +84,7 @@ slow:
 		return -ENOMEM;
 	}
 	inode->i_ino = ns->inum;
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_atime = inode_set_ctime_current(inode);
 	inode->i_flags |= S_IMMUTABLE;
 	inode->i_mode = S_IFREG | S_IRUGO;
 	inode->i_fop = &ns_file_operations;
@@ -233,24 +233,6 @@ int ns_get_name(char *buf, size_t size, struct task_struct *task,
 bool proc_ns_file(const struct file *file)
 {
 	return file->f_op == &ns_file_operations;
-}
-
-struct file *proc_ns_fget(int fd)
-{
-	struct file *file;
-
-	file = fget(fd);
-	if (!file)
-		return ERR_PTR(-EBADF);
-
-	if (file->f_op != &ns_file_operations)
-		goto out_invalid;
-
-	return file;
-
-out_invalid:
-	fput(file);
-	return ERR_PTR(-EINVAL);
 }
 
 /**

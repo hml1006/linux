@@ -95,7 +95,7 @@ static DEFINE_SPINLOCK(ubi_devices_lock);
 
 /* "Show" method for files in '/<sysfs>/class/ubi/' */
 /* UBI version attribute ('/<sysfs>/class/ubi/version') */
-static ssize_t version_show(struct class *class, struct class_attribute *attr,
+static ssize_t version_show(const struct class *class, const struct class_attribute *attr,
 			    char *buf)
 {
 	return sprintf(buf, "%d\n", UBI_VERSION);
@@ -111,7 +111,6 @@ ATTRIBUTE_GROUPS(ubi_class);
 /* Root UBI "class" object (corresponds to '/<sysfs>/class/ubi/') */
 struct class ubi_class = {
 	.name		= UBI_NAME_STR,
-	.owner		= THIS_MODULE,
 	.class_groups	= ubi_class_groups,
 };
 
@@ -895,6 +894,13 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
 		return -EINVAL;
 	}
 
+	/* UBI cannot work on flashes with zero erasesize. */
+	if (!mtd->erasesize) {
+		pr_err("ubi: refuse attaching mtd%d - zero erasesize flash is not supported\n",
+			mtd->index);
+		return -EINVAL;
+	}
+
 	if (ubi_num == UBI_DEV_NUM_AUTO) {
 		/* Search for an empty slot in the @ubi_devices array */
 		for (ubi_num = 0; ubi_num < UBI_MAX_DEVICES; ubi_num++)
@@ -1267,7 +1273,7 @@ static int __init ubi_init(void)
 		mutex_lock(&ubi_devices_mutex);
 		err = ubi_attach_mtd_dev(mtd, p->ubi_num,
 					 p->vid_hdr_offs, p->max_beb_per1024,
-					 p->enable_fm == 0 ? true : false);
+					 p->enable_fm == 0);
 		mutex_unlock(&ubi_devices_mutex);
 		if (err < 0) {
 			pr_err("UBI error: cannot attach mtd%d\n",

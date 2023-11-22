@@ -10,7 +10,7 @@
 #include <linux/mfd/core.h>
 #include <linux/module.h>
 #include <linux/mod_devicetable.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/cros_ec_chardev.h>
 #include <linux/platform_data/cros_ec_commands.h>
@@ -20,7 +20,6 @@
 #define DRV_NAME "cros-ec-dev"
 
 static struct class cros_class = {
-	.owner          = THIS_MODULE,
 	.name           = "chromeos",
 };
 

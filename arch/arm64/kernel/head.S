@@ -123,7 +123,7 @@ SYM_CODE_START(primary_entry)
 	 */
 #if VA_BITS > 48
 	mrs_s	x0, SYS_ID_AA64MMFR2_EL1				// 取出arm64内存管理特性寄存器内容
-	tst	x0, #0xf << ID_AA64MMFR2_EL1_VARange_SHIFT	// va range == 0, 48位虚地址，va range == 1 && 粒度64KB, 52位虚地址
+	tst	x0, ID_AA64MMFR2_EL1_VARange_MASK	// va range == 0, 48位虚地址，va range == 1 && 粒度64KB, 52位虚地址
 	mov	x0, #VA_BITS
 	mov	x25, #VA_BITS_MIN
 	csel	x25, x25, x0, eq						// va bit <= 48 位
@@ -161,8 +161,8 @@ CPU_BE( tbz	x19, #SCTLR_ELx_EE_SHIFT, 1f	)
 	pre_disable_mmu_workaround	// 普通cpu为空
 	msr	sctlr_el2, x19
 	b	3f
-	pre_disable_mmu_workaround
-2:	msr	sctlr_el1, x19	// 改成小端，mmu关闭
+2:	pre_disable_mmu_workaround
+	msr	sctlr_el1, x19	// 改成小端，mmu关闭
 3:	isb
 	mov	x19, xzr
 	ret
@@ -402,7 +402,7 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	adrp	x0, init_idmap_pg_dir	// 在vmlinux.lds.S中定义
 	adrp	x3, _text
 	adrp	x6, _end + MAX_FDT_SIZE + SWAPPER_BLOCK_SIZE
-	mov	x7, SWAPPER_RX_MMUFLAGS
+	mov_q	x7, SWAPPER_RX_MMUFLAGS
 
 	// 创建映射表
 	map_memory x0, x1, x3, x6, x7, x3, IDMAP_PGD_ORDER, x10, x11, x12, x13, x14, EXTRA_SHIFT
@@ -412,7 +412,7 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	adrp	x2, init_pg_dir
 	adrp	x3, init_pg_end
 	bic	x4, x2, #SWAPPER_BLOCK_SIZE - 1
-	mov	x5, SWAPPER_RW_MMUFLAGS
+	mov_q	x5, SWAPPER_RW_MMUFLAGS
 	mov	x6, #SWAPPER_BLOCK_SHIFT
 	bl	remap_region
 
@@ -423,7 +423,7 @@ SYM_FUNC_START_LOCAL(create_idmap)
 	bfi	x22, x21, #0, #SWAPPER_BLOCK_SHIFT		// remapped FDT address
 	add	x3, x2, #MAX_FDT_SIZE + SWAPPER_BLOCK_SIZE
 	bic	x4, x21, #SWAPPER_BLOCK_SIZE - 1
-	mov	x5, SWAPPER_RW_MMUFLAGS
+	mov_q	x5, SWAPPER_RW_MMUFLAGS
 	mov	x6, #SWAPPER_BLOCK_SHIFT
 	bl	remap_region
 
@@ -458,7 +458,7 @@ SYM_FUNC_START_LOCAL(create_kernel_mapping)
 	sub	x6, x6, x3			// _end - _text
 	// 内核image 末尾虚地址
 	add	x6, x6, x5			// runtime __va(_end)
-	mov	x7, SWAPPER_RW_MMUFLAGS
+	mov_q	x7, SWAPPER_RW_MMUFLAGS
 
 	map_memory x0, x1, x5, x6, x7, x3, (VA_BITS - PGDIR_SHIFT), x10, x11, x12, x13, x14
 
@@ -636,6 +636,8 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	msr	sctlr_el1, x1					// 设置 el1 系统控制寄存器
 	mov	x2, xzr
 2:
+	__init_el2_nvhe_prepare_eret
+
 	mov	w0, #BOOT_CPU_MODE_EL2
 	orr	x0, x0, x2						// 设置当前 boot CPU mode
 	eret
@@ -787,7 +789,7 @@ SYM_FUNC_START(__cpu_secondary_check52bitva)	// 对比cpu0初始化时的VA地�
 	b.ne	2f
 
 	mrs_s	x0, SYS_ID_AA64MMFR2_EL1
-	and	x0, x0, #(0xf << ID_AA64MMFR2_EL1_VARange_SHIFT)
+	and	x0, x0, ID_AA64MMFR2_EL1_VARange_MASK
 	cbnz	x0, 2f
 
 	update_early_cpu_boot_status \

@@ -60,6 +60,12 @@ struct btrfs_backref_walk_ctx {
 	 * @extent_item_pos is ignored.
 	 */
 	bool ignore_extent_item_pos;
+	/*
+	 * If true and bytenr corresponds to a data extent, then the inode list
+	 * (each member describing inode number, file offset and root) is not
+	 * added to each reference added to the @refs ulist.
+	 */
+	bool skip_inode_ref_list;
 	/* A valid transaction handle or NULL. */
 	struct btrfs_trans_handle *trans;
 	/*
@@ -534,7 +540,8 @@ static inline void btrfs_backref_panic(struct btrfs_fs_info *fs_info,
 		    bytenr);
 }
 
-int btrfs_backref_add_tree_node(struct btrfs_backref_cache *cache,
+int btrfs_backref_add_tree_node(struct btrfs_trans_handle *trans,
+				struct btrfs_backref_cache *cache,
 				struct btrfs_path *path,
 				struct btrfs_backref_iter *iter,
 				struct btrfs_key *node_key,

@@ -183,9 +183,7 @@ ivpu_ipc_send(struct ivpu_device *vdev, struct ivpu_ipc_consumer *cons, struct v
 	struct ivpu_ipc_info *ipc = vdev->ipc;
 	int ret;
 
-	ret = mutex_lock_interruptible(&ipc->lock);
-	if (ret)
-		return ret;
+	mutex_lock(&ipc->lock);
 
 	if (!ipc->on) {
 		ret = -EAGAIN;
@@ -211,19 +209,16 @@ int ivpu_ipc_receive(struct ivpu_device *vdev, struct ivpu_ipc_consumer *cons,
 	struct ivpu_ipc_rx_msg *rx_msg;
 	int wait_ret, ret = 0;
 
-	wait_ret = wait_event_interruptible_timeout(cons->rx_msg_wq,
-						    (IS_KTHREAD() && kthread_should_stop()) ||
-						    !list_empty(&cons->rx_msg_list),
-						    msecs_to_jiffies(timeout_ms));
+	wait_ret = wait_event_timeout(cons->rx_msg_wq,
+				      (IS_KTHREAD() && kthread_should_stop()) ||
+				      !list_empty(&cons->rx_msg_list),
+				      msecs_to_jiffies(timeout_ms));
 
 	if (IS_KTHREAD() && kthread_should_stop())
 		return -EINTR;
 
 	if (wait_ret == 0)
 		return -ETIMEDOUT;
-
-	if (wait_ret < 0)
-		return -ERESTARTSYS;
 
 	spin_lock_irq(&cons->rx_msg_lock);
 	rx_msg = list_first_entry_or_null(&cons->rx_msg_list, struct ivpu_ipc_rx_msg, link);

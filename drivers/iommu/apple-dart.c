@@ -671,8 +671,7 @@ static int apple_dart_attach_dev(struct iommu_domain *domain,
 		return ret;
 
 	switch (domain->type) {
-	case IOMMU_DOMAIN_DMA:
-	case IOMMU_DOMAIN_UNMANAGED:
+	default:
 		ret = apple_dart_domain_add_streams(dart_domain, cfg);
 		if (ret)
 			return ret;
@@ -1150,7 +1149,7 @@ err_clk_disable:
 	return ret;
 }
 
-static int apple_dart_remove(struct platform_device *pdev)
+static void apple_dart_remove(struct platform_device *pdev)
 {
 	struct apple_dart *dart = platform_get_drvdata(pdev);
 
@@ -1161,8 +1160,6 @@ static int apple_dart_remove(struct platform_device *pdev)
 	iommu_device_sysfs_remove(&dart->iommu);
 
 	clk_bulk_disable_unprepare(dart->num_clks, dart->clks);
-
-	return 0;
 }
 
 static const struct apple_dart_hw apple_dart_hw_t8103 = {
@@ -1278,7 +1275,7 @@ static __maybe_unused int apple_dart_resume(struct device *dev)
 	return 0;
 }
 
-DEFINE_SIMPLE_DEV_PM_OPS(apple_dart_pm_ops, apple_dart_suspend, apple_dart_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(apple_dart_pm_ops, apple_dart_suspend, apple_dart_resume);
 
 static const struct of_device_id apple_dart_of_match[] = {
 	{ .compatible = "apple,t8103-dart", .data = &apple_dart_hw_t8103 },
@@ -1296,7 +1293,7 @@ static struct platform_driver apple_dart_driver = {
 		.pm			= pm_sleep_ptr(&apple_dart_pm_ops),
 	},
 	.probe	= apple_dart_probe,
-	.remove	= apple_dart_remove,
+	.remove_new = apple_dart_remove,
 };
 
 module_platform_driver(apple_dart_driver);

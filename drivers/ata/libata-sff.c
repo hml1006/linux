@@ -883,31 +883,21 @@ static void ata_hsm_qc_complete(struct ata_queued_cmd *qc, int in_wq)
 {
 	struct ata_port *ap = qc->ap;
 
-	if (ap->ops->error_handler) {
-		if (in_wq) {
-			/* EH might have kicked in while host lock is
-			 * released.
-			 */
-			qc = ata_qc_from_tag(ap, qc->tag);
-			if (qc) {
-				if (likely(!(qc->err_mask & AC_ERR_HSM))) {
-					ata_sff_irq_on(ap);
-					ata_qc_complete(qc);
-				} else
-					ata_port_freeze(ap);
-			}
-		} else {
-			if (likely(!(qc->err_mask & AC_ERR_HSM)))
+	if (in_wq) {
+		/* EH might have kicked in while host lock is released. */
+		qc = ata_qc_from_tag(ap, qc->tag);
+		if (qc) {
+			if (likely(!(qc->err_mask & AC_ERR_HSM))) {
+				ata_sff_irq_on(ap);
 				ata_qc_complete(qc);
-			else
+			} else
 				ata_port_freeze(ap);
 		}
 	} else {
-		if (in_wq) {
-			ata_sff_irq_on(ap);
+		if (likely(!(qc->err_mask & AC_ERR_HSM)))
 			ata_qc_complete(qc);
-		} else
-			ata_qc_complete(qc);
+		else
+			ata_port_freeze(ap);
 	}
 }
 
@@ -1971,7 +1961,7 @@ int sata_sff_hardreset(struct ata_link *link, unsigned int *class,
 		       unsigned long deadline)
 {
 	struct ata_eh_context *ehc = &link->eh_context;
-	const unsigned long *timing = sata_ehc_deb_timing(ehc);
+	const unsigned int *timing = sata_ehc_deb_timing(ehc);
 	bool online;
 	int rc;
 
@@ -2281,7 +2271,7 @@ EXPORT_SYMBOL_GPL(ata_pci_sff_prepare_host);
  */
 int ata_pci_sff_activate_host(struct ata_host *host,
 			      irq_handler_t irq_handler,
-			      struct scsi_host_template *sht)
+			      const struct scsi_host_template *sht)
 {
 	struct device *dev = host->dev;
 	struct pci_dev *pdev = to_pci_dev(dev);
@@ -2378,7 +2368,7 @@ static const struct ata_port_info *ata_sff_find_valid_pi(
 
 static int ata_pci_init_one(struct pci_dev *pdev,
 		const struct ata_port_info * const *ppi,
-		struct scsi_host_template *sht, void *host_priv,
+		const struct scsi_host_template *sht, void *host_priv,
 		int hflags, bool bmdma)
 {
 	struct device *dev = &pdev->dev;
@@ -2452,7 +2442,7 @@ out:
  */
 int ata_pci_sff_init_one(struct pci_dev *pdev,
 		 const struct ata_port_info * const *ppi,
-		 struct scsi_host_template *sht, void *host_priv, int hflag)
+		 const struct scsi_host_template *sht, void *host_priv, int hflag)
 {
 	return ata_pci_init_one(pdev, ppi, sht, host_priv, hflag, 0);
 }
@@ -3175,7 +3165,7 @@ EXPORT_SYMBOL_GPL(ata_pci_bmdma_prepare_host);
  */
 int ata_pci_bmdma_init_one(struct pci_dev *pdev,
 			   const struct ata_port_info * const * ppi,
-			   struct scsi_host_template *sht, void *host_priv,
+			   const struct scsi_host_template *sht, void *host_priv,
 			   int hflags)
 {
 	return ata_pci_init_one(pdev, ppi, sht, host_priv, hflags, 1);

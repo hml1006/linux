@@ -10,10 +10,10 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/err.h>
 #include <linux/types.h>
-#include <linux/of_platform.h>
 #include <linux/io.h>
 #include <linux/thermal.h>
 #include <linux/of.h>
@@ -248,7 +248,7 @@ static inline int k3_bgp_read_temp(struct k3_thermal_data *devdata,
 /* Get temperature callback function for thermal zone */
 static int k3_thermal_get_temp(struct thermal_zone_device *tz, int *temp)
 {
-	return k3_bgp_read_temp(tz->devdata, temp);
+	return k3_bgp_read_temp(thermal_zone_device_priv(tz), temp);
 }
 
 static const struct thermal_zone_device_ops k3_of_thermal_ops = {
@@ -501,8 +501,6 @@ static int k3_j72xx_bandgap_probe(struct platform_device *pdev)
 	mdelay(100);
 	writel(K3_VTM_ANYMAXT_OUTRG_ALERT_EN, data[0].bgp->cfg2_base +
 	       K3_VTM_MISC_CTRL_OFFSET);
-
-	platform_set_drvdata(pdev, bgp);
 
 	print_look_up_table(dev, ref_table);
 	/*

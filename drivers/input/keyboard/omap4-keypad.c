@@ -274,8 +274,7 @@ static int omap4_keypad_parse_dt(struct device *dev,
 	if (err)
 		return err;
 
-	if (of_get_property(np, "linux,input-no-autorepeat", NULL))
-		keypad_data->no_autorepeat = true;
+	keypad_data->no_autorepeat = of_property_read_bool(np, "linux,input-no-autorepeat");
 
 	return 0;
 }
@@ -342,16 +341,9 @@ static int omap4_keypad_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct omap4_keypad *keypad_data;
 	struct input_dev *input_dev;
-	struct resource *res;
 	unsigned int max_keys;
 	int irq;
 	int error;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "no base address specified\n");
-		return -EINVAL;
-	}
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
@@ -371,7 +363,7 @@ static int omap4_keypad_probe(struct platform_device *pdev)
 	if (error)
 		return error;
 
-	keypad_data->base = devm_ioremap_resource(dev, res);
+	keypad_data->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(keypad_data->base))
 		return PTR_ERR(keypad_data->base);
 

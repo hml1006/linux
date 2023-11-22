@@ -206,6 +206,7 @@ TRACE_EVENT(kvm_get_timer_map,
 		__field(	unsigned long,		vcpu_id	)
 		__field(	int,			direct_vtimer	)
 		__field(	int,			direct_ptimer	)
+		__field(	int,			emul_vtimer	)
 		__field(	int,			emul_ptimer	)
 	),
 
@@ -214,14 +215,17 @@ TRACE_EVENT(kvm_get_timer_map,
 		__entry->direct_vtimer		= arch_timer_ctx_index(map->direct_vtimer);
 		__entry->direct_ptimer =
 			(map->direct_ptimer) ? arch_timer_ctx_index(map->direct_ptimer) : -1;
+		__entry->emul_vtimer =
+			(map->emul_vtimer) ? arch_timer_ctx_index(map->emul_vtimer) : -1;
 		__entry->emul_ptimer =
 			(map->emul_ptimer) ? arch_timer_ctx_index(map->emul_ptimer) : -1;
 	),
 
-	TP_printk("VCPU: %ld, dv: %d, dp: %d, ep: %d",
+	TP_printk("VCPU: %ld, dv: %d, dp: %d, ev: %d, ep: %d",
 		  __entry->vcpu_id,
 		  __entry->direct_vtimer,
 		  __entry->direct_ptimer,
+		  __entry->emul_vtimer,
 		  __entry->emul_ptimer)
 );
 
@@ -358,6 +362,32 @@ TRACE_EVENT(kvm_inject_nested_exception,
 		  __entry->esr_el2, __entry->pc, __entry->spsr_el2,
 		  __print_symbolic(__entry->source_mode, kvm_mode_names),
 		  __entry->hcr_el2)
+);
+
+TRACE_EVENT(kvm_forward_sysreg_trap,
+	    TP_PROTO(struct kvm_vcpu *vcpu, u32 sysreg, bool is_read),
+	    TP_ARGS(vcpu, sysreg, is_read),
+
+	    TP_STRUCT__entry(
+		__field(u64,	pc)
+		__field(u32,	sysreg)
+		__field(bool,	is_read)
+	    ),
+
+	    TP_fast_assign(
+		__entry->pc = *vcpu_pc(vcpu);
+		__entry->sysreg = sysreg;
+		__entry->is_read = is_read;
+	    ),
+
+	    TP_printk("%llx %c (%d,%d,%d,%d,%d)",
+		      __entry->pc,
+		      __entry->is_read ? 'R' : 'W',
+		      sys_reg_Op0(__entry->sysreg),
+		      sys_reg_Op1(__entry->sysreg),
+		      sys_reg_CRn(__entry->sysreg),
+		      sys_reg_CRm(__entry->sysreg),
+		      sys_reg_Op2(__entry->sysreg))
 );
 
 #endif /* _TRACE_ARM_ARM64_KVM_H */

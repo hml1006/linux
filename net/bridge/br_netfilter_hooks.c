@@ -277,7 +277,8 @@ int br_nf_pre_routing_finish_bridge(struct net *net, struct sock *sk, struct sk_
 		struct nf_bridge_info *nf_bridge = nf_bridge_info_get(skb);
 		int ret;
 
-		if ((neigh->nud_state & NUD_CONNECTED) && neigh->hh.hh_len) {
+		if ((READ_ONCE(neigh->nud_state) & NUD_CONNECTED) &&
+		    READ_ONCE(neigh->hh.hh_len)) {
 			neigh_hh_bridge(&neigh->hh, skb);
 			skb->dev = nf_bridge->physindev;
 			ret = br_handle_frame_finish(net, sk, skb);
@@ -293,7 +294,7 @@ int br_nf_pre_routing_finish_bridge(struct net *net, struct sock *sk, struct sk_
 			/* tell br_dev_xmit to continue with forwarding */
 			nf_bridge->bridged_dnat = 1;
 			/* FIXME Need to refragment */
-			ret = neigh->output(neigh, skb);
+			ret = READ_ONCE(neigh->output)(neigh, skb);
 		}
 		neigh_release(neigh);
 		return ret;
@@ -1134,7 +1135,8 @@ static int br_netfilter_sysctl_init_net(struct net *net)
 
 	br_netfilter_sysctl_default(brnet);
 
-	brnet->ctl_hdr = register_net_sysctl(net, "net/bridge", table);
+	brnet->ctl_hdr = register_net_sysctl_sz(net, "net/bridge", table,
+						ARRAY_SIZE(brnf_table));
 	if (!brnet->ctl_hdr) {
 		if (!net_eq(net, &init_net))
 			kfree(table);
