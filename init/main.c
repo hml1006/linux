@@ -951,6 +951,7 @@ void start_kernel(void)
 	sort_main_extable();
 	// 系统保留中断向量初始化
 	trap_init();
+	// 内存管理相关结构，cache，内存调试模块，内存分配模块等初始化
 	mm_core_init();
 	poking_init();
 	// ftrace内核调试

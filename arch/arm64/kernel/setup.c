@@ -302,6 +302,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	*cmdline_p = boot_command_line;
 
+	// 内核地址空间layout random，为了安全，但是通过外部调试器调试需要关闭，这个功能会导致比如qemu找不到符号
 	kaslr_init();
 
 	/*
@@ -323,9 +324,11 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 * Initialise the static keys early as they may be enabled by the
 	 * cpufeature code and early parameters.
 	 */
+	 // 排序并初始化jump label section，后面会用到
 	jump_label_init();
 	parse_early_param();
 
+	// shadow call stack
 	dynamic_scs_init();
 
 	/*
@@ -342,6 +345,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	cpu_uninstall_idmap();
 
 	xen_early_init();
+
+	// efi初始化，主要是根据efi的表构造memory map，efi数据再fdt
 	efi_init();
 
 	if (!efi_enabled(EFI_BOOT)) {
@@ -351,6 +356,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 			   FW_BUG "Booted with MMU enabled!");
 	}
 
+	// 内存块初始化，remove一些no-map区域，reserve一些如kernel，fdt，ramdisk，device等内存空间，
 	arm64_memblock_init();
 
 	paging_init();
