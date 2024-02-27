@@ -15,8 +15,11 @@ elif [ ! -d "k_shared" ];then
   mkdir k_shared
 fi
 
-qemu-system-aarch64 -cpu cortex-a57 -machine virt \
+sudo cp qemu-ifup /etc/
+
+sudo qemu-system-aarch64 -cpu cortex-a57 -machine virt \
   -m 4096 -smp 2 \
+  -net tap,ifname=tap0 -net nic \
   -drive file=nvme.img,if=none,id=nvm0 \
   -device nvme,serial=12345678,drive=nvm0 \
   -kernel arch/arm64/boot/Image \
