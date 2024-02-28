@@ -122,10 +122,12 @@ CPU处理器会从异常发生现场的异常等级切换到对应目标异常�
 	 * after panic() re-enables interrupts.
 	 */
 	mrs	x0, tpidr_el0			// sp of interrupted context
-	sub	x0, sp, x0			// delta with top of overflow stack, 计算主栈和备用栈的地址偏移
+	sub	x0, sp, x0			// delta with top of overflow stack, 计算主栈和overflow stack的地址偏移
 	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?  判断interrupted sp和overflow_stack sp的偏移是否在overflow stack size内
-										// 为0则说明之前的sp在overflow stack地址范围
-	b.ne	__bad_stack			// no? -> bad stack pointer
+										// 为0则说明异常发生时的sp在overflow stack地址范围，正在处理panic时发生中断，否则说明某些代码触发了stack Overflow，
+										// 接下来处理panic
+	b.ne	__bad_stack			// no? -> bad stack pointer 跳转处理stack Overflow流程
+									// yes? -> continue
 
 	/* We were already on the overflow stack. Restore sp/x0 and carry on. */
 	sub	sp, sp, x0
@@ -623,16 +625,16 @@ SYM_CODE_START_LOCAL(__bad_stack)
 	 * PT_REGS_SIZE) was stashed in tpidr_el0 by kernel_ventry.
 	 */
 	sub	sp, sp, #PT_REGS_SIZE
-	kernel_entry 1
+	kernel_entry 1	// 保存GPRs
 	mrs	x0, tpidr_el0
 	add	x0, x0, #PT_REGS_SIZE
-	str	x0, [sp, #S_SP]
+	str	x0, [sp, #S_SP]	// 保存Overflow sp
 
 	/* Stash the regs for handle_bad_stack */
 	mov	x0, sp
 
 	/* Time to die */
-	bl	handle_bad_stack
+	bl	handle_bad_stack	// 处理bad stack， 栈回溯
 	ASM_BUG()
 SYM_CODE_END(__bad_stack)
 #endif /* CONFIG_VMAP_STACK */

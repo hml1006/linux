@@ -911,7 +911,7 @@ void start_kernel(void)
 	// per cpu 变量访问方式为x86 gs:ptr, 每个cpu的per cpu变量地址放gs寄存器, arm64 TPDIR_EL1寄存器放基址
 	setup_per_cpu_areas();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
-	// 设置boot cpu 状态
+	// 设置boot cpu 热插拔状态
 	boot_cpu_hotplug_init();
 
 	pr_notice("Kernel command line: %s\n", saved_command_line);
