@@ -1021,6 +1021,8 @@ void start_kernel(void)
 
 	/* These make use of the fully initialized rng */
 	kfence_init();
+	// 栈溢出保护, 给当前boot task设置canary，如果踩到可被检查出来
+	// 依赖编译器stack protect特性支持，调用函数时设置canary，return时检查canary
 	boot_init_stack_canary();
 
 	perf_event_init();
