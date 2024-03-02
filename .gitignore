@@ -173,3 +173,4 @@ sphinx_*/
 
 # disk image file
 /*.img
+/rootfs/
