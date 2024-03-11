@@ -1310,10 +1310,11 @@ bool __init early_init_dt_scan(void *params)
 {
 	bool status;
 
+	// 设备树完整性校验
 	status = early_init_dt_verify(params);
 	if (!status)
 		return false;
-
+	// 扫描设备树节点
 	early_init_dt_scan_nodes();
 	return true;
 }
