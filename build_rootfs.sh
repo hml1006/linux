@@ -28,6 +28,7 @@ echo "nameserver 8.8.8" | sudo tee -a ./rootfs/etc/resolv.conf
 echo "options edns0 trust-ad" | sudo tee -a ./rootfs/etc/resolv.conf
 echo "search localdomain" | sudo tee -a ./rootfs/etc/resolv.conf
 
+sudo rm -f ./rootfs/root/install.sh
 echo "#!/bin/sh" | sudo tee -a ./rootfs/root/install.sh
 echo "cd /root/" | sudo tee -a ./rootfs/root/install.sh
 
