@@ -12,27 +12,41 @@ if [ ! -e rootfs ];then
     tar -xzvf ubuntu-base-23.10-base-arm64.tar.gz -C rootfs
 fi
 
-sudo cp *.deb ./rootfs/root
-sudo cp /etc/resolv.conf ./rootfs/etc/
-# sudo cp /etc/apt/sources.list ./rootfs/etc/apt/
-echo "nameserver 8.8.8" | sudo tee -a ./rootfs/etc/resolv.conf
-echo "options edns0 trust-ad" | sudo tee -a ./rootfs/etc/resolv.conf
-echo "search localdomain" | sudo tee -a ./rootfs/etc/resolv.conf
+sudo rm -f ./rootfs/etc/resolv.conf
+resolv=$(cat <<"EOF"
+nameserver 8.8.8
+options edns0 trust-ad
+search localdomain
+EOF
+)
+echo "${resolv}" | sudo tee -a ./rootfs/etc/resolv.conf
 
-sudo rm -f ./rootfs/root/install.sh
-echo "#!/bin/sh" | sudo tee -a ./rootfs/root/install.sh
-echo "cd /root/" | sudo tee -a ./rootfs/root/install.sh
-echo "useradd -G sudo -m -s /bin/bash louis" | sudo tee -a ./rootfs/root/install.sh
-echo "echo louis:yes | chpasswd" | sudo tee -a ./rootfs/root/install.sh
-echo "passwd root" | sudo tee -a ./rootfs/root/install.sh
-echo "echo louis.arm > /etc/hostname" | sudo tee -a ./rootfs/root/install.sh
-echo "echo 127.0.0.1	localhost > /etc/hosts" | sudo tee -a ./rootfs/root/install.sh
+interfaces=$(cat <<"EOF"
+auto lo
+iface lo inet loopback
 
-echo "chmod 777 /tmp/" | sudo tee -a ./rootfs/root/install.sh
-echo "apt update" | sudo tee -a ./rootfs/root/install.sh
-echo "apt upgrade" | sudo tee -a ./rootfs/root/install.sh
-echo "apt install -y dialog perl systemd sudo vim nano kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh iputils-ping resolvconf wget apt-utils" | sudo tee -a ./rootfs/root/install.sh
-echo "ln -s /lib/systemd/system/getty\@.service /etc/systemd/system/getty.target.wants/getty\@ttyAMA0.service" | sudo tee -a ./rootfs/root/install.sh
+auto eth0
+iface eth0 inet dhcp
+EOF
+)
+echo "${interfaces}" | sudo tee -a ./rootfs/etc/network/interfaces
+
+install=$(cat <<"EOF"
+#!/bin/sh
+cd /root/
+useradd -G sudo -m -s /bin/bash louis
+echo louis:yes | chpasswd
+passwd root
+echo louis.arm > /etc/hostname
+echo 127.0.0.1	localhost > /etc/hosts
+chmod 777 /tmp/
+apt update
+apt upgrade -y
+apt install -y dialog perl systemd sudo vim nano kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh iputils-ping resolvconf wget apt-utils
+ln -s /lib/systemd/system/getty\@.service /etc/systemd/system/getty.target.wants/getty\@ttyAMA0.service
+EOF
+)
+echo "${install}" | sudo tee -a ./rootfs/root/install.sh
 
 sudo chmod +x ./rootfs/root/install.sh
 sudo cp /usr/bin/qemu-arm-static ./rootfs/usr/bin/
