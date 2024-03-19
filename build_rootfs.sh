@@ -7,15 +7,6 @@ sudo apt-get install qemu-user-static
 if [ ! -e ubuntu-base-23.10-base-arm64.tar.gz ];then
     wget http://cdimage.ubuntu.com/ubuntu-base/releases/mantic/release/ubuntu-base-23.10-base-arm64.tar.gz
 fi
-if [ ! -e ca-certificates_20230311ubuntu1_all.deb ];then
-    wget http://ports.ubuntu.com/pool/main/c/ca-certificates/ca-certificates_20230311ubuntu1_all.deb
-fi
-if [ ! -e libssl3_3.0.10-1ubuntu4_arm64.deb ];then
-    wget http://ports.ubuntu.com/pool/main/o/openssl/libssl3_3.0.10-1ubuntu4_arm64.deb
-fi
-if [ ! -e openssl_3.0.10-1ubuntu4_arm64.deb ];then
-    wget http://ports.ubuntu.com/pool/main/o/openssl/openssl_3.0.10-1ubuntu4_arm64.deb
-fi
 if [ ! -e rootfs ];then
     mkdir rootfs
     tar -xzvf ubuntu-base-23.10-base-arm64.tar.gz -C rootfs
@@ -31,13 +22,16 @@ echo "search localdomain" | sudo tee -a ./rootfs/etc/resolv.conf
 sudo rm -f ./rootfs/root/install.sh
 echo "#!/bin/sh" | sudo tee -a ./rootfs/root/install.sh
 echo "cd /root/" | sudo tee -a ./rootfs/root/install.sh
+echo "useradd -G sudo -m -s /bin/bash louis" | sudo tee -a ./rootfs/root/install.sh
+echo "echo louis:yes | chpasswd" | sudo tee -a ./rootfs/root/install.sh
+echo "passwd root" | sudo tee -a ./rootfs/root/install.sh
+echo "echo louis.arm > /etc/hostname" | sudo tee -a ./rootfs/root/install.sh
+echo "echo 127.0.0.1	localhost > /etc/hosts" | sudo tee -a ./rootfs/root/install.sh
 
-echo "dpkg -i libssl3_3.0.10-1ubuntu4_arm64.deb" | sudo tee -a ./rootfs/root/install.sh
-echo "dpkg -i openssl_3.0.10-1ubuntu4_arm64.deb" | sudo tee -a ./rootfs/root/install.sh
-echo "dpkg -i ca-certificates_20230311ubuntu1_all.deb" | sudo tee -a ./rootfs/root/install.sh
 echo "chmod 777 /tmp/" | sudo tee -a ./rootfs/root/install.sh
 echo "apt update" | sudo tee -a ./rootfs/root/install.sh
-echo "apt install -y systemd sudo vim nano kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh" | sudo tee -a ./rootfs/root/install.sh
+echo "apt upgrade" | sudo tee -a ./rootfs/root/install.sh
+echo "apt install -y dialog perl systemd sudo vim nano kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh iputils-ping resolvconf wget apt-utils" | sudo tee -a ./rootfs/root/install.sh
 echo "ln -s /lib/systemd/system/getty\@.service /etc/systemd/system/getty.target.wants/getty\@ttyAMA0.service" | sudo tee -a ./rootfs/root/install.sh
 
 sudo chmod +x ./rootfs/root/install.sh

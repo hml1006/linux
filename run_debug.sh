@@ -18,15 +18,18 @@ fi
 cur_dir=`pwd`
 gdb_cfg=${HOME}/.config/gdb
 mkdir -p ${gdb_cfg}
-echo "add-auto-load-safe-path ${cur_dir}/.gdbinit"
+echo "add-auto-load-safe-path ${cur_dir}/.gdbinit" > ${gdb_cfg}/gdbinit
 echo "set auto-load python-scripts on" > .gdbinit
-echo "add-auto-load-safe-path ${cur_dir}/" >> .gdbinit
-echo "source ${cur_dir}/add-auto-load-safe-path /home/louis/code/linux/" >> .gdbinit
+echo "add-auto-load-safe-path ${cur_dir}" >> .gdbinit
+
 echo "set architecture aarch64" >> .gdbinit
 echo "file vmlinux" >> .gdbinit
 echo "b start_kernel" >> .gdbinit
 
 sudo cp qemu-ifup /etc/
+
+# 修改ctr c
+stty intr ^]
 
 sudo qemu-system-aarch64 -cpu cortex-a57 -machine virt \
   -m 4096 -smp 2 \
@@ -39,3 +42,6 @@ sudo qemu-system-aarch64 -cpu cortex-a57 -machine virt \
   --append "root=/dev/vda rootfstype=ext4 rw loglevel=8 console=ttyAMA0"  \
   -serial stdio \
   -drive file=ubuntu-rootfs.img,index=0,media=disk,format=raw -S -s
+
+# 恢复ctr c
+stty intr ^c
