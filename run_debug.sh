@@ -32,18 +32,29 @@ if [ ${br0_exists} -eq 1 ];then
 fi
 
 #获取当前使用中的网卡
-nic=`awk 'BEGIN {max = 0} {if ($2+0 > max+0) {max=$2 ;content=$0} } END {print $1}' /proc/net/dev | cut -d : -f 1`
-nic=wlp4s0
+nic_list=`ls /sys/class/net/`
+for nic in ${nic_list}
+do
+  if [[ ${nic} == "lo" && ${nic} == "br0" && ${nic} == "tun0" && ${nic} == "tap0" ]];then
+    break
+  fi
+  rx_bytes=`cat /sys/class/net/${nic}/statistics/rx_bytes`
+  tx_bytes=`cat /sys/class/net/${nic}/statistics/tx_bytes`
+  if [[ ${rx_bytes} -gt 0 && ${tx_bytes} -gt 0 ]];then
+    export used_nic=${nic}
+    break
+  fi
+done
 sudo apt-get install bridge-utils -y # 安装网桥设备工具箱
-sudo ifconfig ${nic} down
+sudo ifconfig ${used_nic} down
 sudo ifconfig br0 down
 sudo brctl addbr br0 # 创建网桥设备 br0
-sudo brctl addif br0 ${nic} # 添加网卡 ${nic} 到网桥 br0
+sudo brctl addif br0 ${used_nic} # 添加网 ${nic} 到网桥 br0
 sudo brctl stp br0 off # 关闭网桥 br0 的生成树协议
 sudo brctl setfd br0 1 # 设置网桥 br0 转发延迟为1秒
 sudo brctl sethello br0 1 # 设置网桥 br0 'hello time' 为1秒
 sudo ifconfig br0 0.0.0.0 promisc up # 设置网桥 br0 为混杂模式
-sudo ifconfig ${nic} 0.0.0.0 promisc up # 设置网卡 ${nic} 为混杂模式
+sudo ifconfig ${used_nic} 0.0.0.0 promisc up # 设置网卡为混杂模式
 sudo dhclient br0 # 为网桥 br0 获取 IP
 
 sudo apt-get install uml-utilities -y # 安装 tun/tap 工具箱

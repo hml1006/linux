@@ -14,12 +14,12 @@ fi
 
 sudo rm -f ./rootfs/etc/resolv.conf
 resolv=$(cat <<"EOF"
-nameserver 8.8.8
+nameserver 8.8.8.8
 options edns0 trust-ad
 search localdomain
 EOF
 )
-echo "${resolv}" | sudo tee -a ./rootfs/etc/resolv.conf
+sudo echo "${resolv}" > ./rootfs/etc/resolv.conf
 
 interfaces=$(cat <<"EOF"
 auto lo
@@ -29,7 +29,8 @@ auto eth0
 iface eth0 inet dhcp
 EOF
 )
-echo "${interfaces}" | sudo tee -a ./rootfs/etc/network/interfaces
+mkdir -p ./rootfs/etc/network/
+sudo echo "${interfaces}" > ./rootfs/etc/network/interfaces
 
 install=$(cat <<"EOF"
 #!/bin/sh
@@ -46,7 +47,7 @@ apt install -y dialog perl systemd sudo vim nano kmod net-tools ethtool ifupdown
 ln -s /lib/systemd/system/getty\@.service /etc/systemd/system/getty.target.wants/getty\@ttyAMA0.service
 EOF
 )
-echo "${install}" | sudo tee -a ./rootfs/root/install.sh
+sudo echo "${install}" > ./rootfs/root/install.sh
 
 sudo chmod +x ./rootfs/root/install.sh
 sudo cp /usr/bin/qemu-arm-static ./rootfs/usr/bin/
