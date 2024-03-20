@@ -26,7 +26,10 @@ auto lo
 iface lo inet loopback
 
 auto eth0
-iface eth0 inet dhcp
+iface eth0 inet static
+address 192.168.5.80
+netmask 255.255.255.0
+gateway 192.168.5.2
 EOF
 )
 mkdir -p ./rootfs/etc/network/

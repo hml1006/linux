@@ -45,22 +45,15 @@ do
     break
   fi
 done
-sudo apt-get install bridge-utils -y # 安装网桥设备工具箱
-sudo ifconfig ${used_nic} down
-sudo ifconfig br0 down
-sudo brctl addbr br0 # 创建网桥设备 br0
-sudo brctl addif br0 ${used_nic} # 添加网 ${nic} 到网桥 br0
-sudo brctl stp br0 off # 关闭网桥 br0 的生成树协议
-sudo brctl setfd br0 1 # 设置网桥 br0 转发延迟为1秒
-sudo brctl sethello br0 1 # 设置网桥 br0 'hello time' 为1秒
-sudo ifconfig br0 0.0.0.0 promisc up # 设置网桥 br0 为混杂模式
-sudo ifconfig ${used_nic} 0.0.0.0 promisc up # 设置网卡为混杂模式
-sudo dhclient br0 # 为网桥 br0 获取 IP
 
+# wifi网络无法加入网桥，所以只能用nat方式
 sudo apt-get install uml-utilities -y # 安装 tun/tap 工具箱
+sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+
 sudo tunctl -t tap0 -u root # 建立 tap0
-sudo brctl addif br0 tap0 # 将 tap0 添加到网桥 br0
-sudo ifconfig tap0 0.0.0.0 promisc up # 将 tap0 设置为混杂模式
+sudo ifconfig tap0 192.168.5.2 promisc up # 将 tap0 设置为混杂模式
+sudo route add -net 192.168.5.0 netmask 255.255.255.0 dev tap0
+sudo iptables -t nat -A POSTROUTING -s 192.168.5.0/24 -o ${used_nic} -j MASQUERADE
 
 # 修改ctr c
 stty intr ^]
