@@ -48,7 +48,7 @@ done
 
 # wifi网络无法加入网桥，所以只能用nat方式
 sudo apt-get install uml-utilities -y # 安装 tun/tap 工具箱
-sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
 sudo tunctl -t tap0 -u root # 建立 tap0
 sudo ifconfig tap0 192.168.5.2 promisc up # 将 tap0 设置为混杂模式
