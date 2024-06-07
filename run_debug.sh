@@ -58,7 +58,7 @@ sudo iptables -t nat -A POSTROUTING -s 192.168.5.0/24 -o ${used_nic} -j MASQUERA
 # 修改ctr c
 stty intr ^]
 
-sudo qemu-system-aarch64 -cpu cortex-a57 -machine virt \
+sudo qemu-system-aarch64 -cpu cortex-a710 -machine virt \
   -m 4096 -smp 2 \
   -net nic -net tap,ifname=tap0,script=no,downscript=no \
   -drive file=nvme.img,format=raw,if=none,id=nvm0 \
