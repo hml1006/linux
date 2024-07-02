@@ -998,7 +998,7 @@ KBUILD_CFLAGS  += -fno-stack-check
 
 # conserve stack if available
 ifdef CONFIG_CC_IS_GCC
-KBUILD_CFLAGS   += -fconserve-stack
+KBUILD_CFLAGS   += -fconserve-stack -fdump-rtl-expand
 endif
 
 # change __FILE__ to the relative path from the srctree
