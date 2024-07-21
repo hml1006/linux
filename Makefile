@@ -493,7 +493,7 @@ OBJDUMP		= $(LLVM_PREFIX)llvm-objdump$(LLVM_SUFFIX)
 READELF		= $(LLVM_PREFIX)llvm-readelf$(LLVM_SUFFIX)
 STRIP		= $(LLVM_PREFIX)llvm-strip$(LLVM_SUFFIX)
 else
-CC		= $(CROSS_COMPILE)gcc
+CC		= ccache $(CROSS_COMPILE)gcc
 LD		= $(CROSS_COMPILE)ld
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -1007,7 +1007,7 @@ KBUILD_CFLAGS  += -fno-stack-check
 
 # conserve stack if available
 ifdef CONFIG_CC_IS_GCC
-KBUILD_CFLAGS   += -fconserve-stack
+KBUILD_CFLAGS   += -fconserve-stack -fdump-rtl-expand
 endif
 
 # change __FILE__ to the relative path from the srctree
