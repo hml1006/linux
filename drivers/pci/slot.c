@@ -364,6 +364,9 @@ void pci_hp_remove_module_link(struct pci_slot *pci_slot)
 EXPORT_SYMBOL_GPL(pci_hp_remove_module_link);
 #endif
 
+/**
+ * sysfs建立slots
+ */
 static int pci_slot_init(void)
 {
 	struct kset *pci_bus_kset;
