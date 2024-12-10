@@ -94,10 +94,10 @@ SYM_CODE_START(primary_entry)
 	bl	record_mmu_state	// 从系统控制寄存器提取mmu开启关闭状态放入x19
 	bl	preserve_boot_args	// 把BootLoader传递的x0-x3寄存器放入boot_args数组
 
-	adrp	x1, early_init_stack
+	adrp	x1, early_init_stack	// 设置内核启动时临时使用的stack基址
 	mov	sp, x1
 	mov	x29, xzr
-	adrp	x0, init_idmap_pg_dir
+	adrp	x0, init_idmap_pg_dir	// 设置一一映射页表的地址
 	mov	x1, xzr
 	bl	__pi_create_init_idmap		// 创建虚地址到物理地址的一一映射，开启MMU要用到
 
@@ -111,7 +111,7 @@ SYM_CODE_START(primary_entry)
 	mov	x1, x0				// end of used region
 	adrp    x0, init_idmap_pg_dir
 	adr_l	x2, dcache_inval_poc
-	blr	x2
+	blr	x2					// invalidate cache
 	b	1f
 
 	/*
