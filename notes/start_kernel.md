@@ -19,7 +19,42 @@ start_kernel
     -->early_security_init<初期安全模块初始化>
     -->setup_arch<体系结构相关初始化>
         -->setup_initial_init_mm<初始化init 内存管理器>
+    -->kaslr_init<Kernel Address Space Layout Random 内核地址随机化初始化>
         -->early_fixmap_init<初始化L0, L1, L2 fixmap区域对应的页表entry>
+            -->early_fixmap_init_pud<初始化Page Upper Directory>
+                -->__p4d_populate<启用5级页表则初始化p4d，p4d在pgd和pud之间>
+                    -->set_p4d<pgtable_l4_enabled = true即启用5级页表，才会执行>
+                -->pud_offset_kimg<获取pud地址>
+                    -->p4d_to_folded_pud<pgtable_l4_enabled = false, 获取addr在p4d中的entry地址>
+                -->early_fixmap_init_pmd<初始化pud entry的值和pmd>
+                    -->__pud_populate<填充pud entry>
+                        -->set_pud<设置pud entry>
+                            -->set_swapper_pgd<非5级页表填充pgd entry>
+                            --><5级页表直接填entry>
+                    -->early_fixmap_init_pte<初始化pte的上级页表>
+                        -->__pmd_populate<>
+                            -->set_pmd<填充pmd entry>
+        -->early_ioremap_init<初始化 7 个虚地址slot，每个 slot 指向一段 fixmap区域>
+            -->early_ioremap_setup<循环初始化slot>
+        -->setup_machine_fdt<映射fdt地址>
+            -->fixmap_remap_fdt<映射到pte>
+                -->create_mapping_noalloc<映射第一个chunk，以便读取header信息>
+                    -->__create_pgd_mapping
+                        -->__create_pgd_mapping_locked
+                            -->alloc_init_p4d
+                                -->alloc_init_pud
+                                    -->alloc_init_cont_pmd
+                                        -->init_pmd
+                                            -->alloc_init_cont_pte
+                                                -->init_pte
+                                                    -->__set_pte_nosync<填充pte>
+                -->从fdt header获取size
+                -->create_mapping_noalloc<映射剩余data>
+            -->memblock_reserve<reserve fdt物理地址>
+                -->memblock_add_range<添加fdt range, 添加的内存如果存在重叠，需要处理合并>
+                    -->memblock_insert_region
+            -->fixmap_remap_fdt<映射完成后页表设置read only, 防止fdt被修改>
+            -->of_flat_dt_get_machine_name<从 fdt查找machine信息>
+            -->dump_stack_set_arch_desc<设置machine信息到dump stack desc>
+
 ```
-
-
