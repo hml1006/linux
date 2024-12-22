@@ -304,6 +304,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	 // 排序并初始化jump label section，后面会用到
 	jump_label_init();
+
+	// 解析内核早期启动参数，比如grub传递的quiet参数
 	parse_early_param();
 
 	// shadow call stack
@@ -330,7 +332,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	xen_early_init();
 
-	// efi初始化，主要是根据efi的表构造memory map，efi数据再fdt
+	// efi初始化，主要是根据efi的表构造memory map，efi数据在fdt
 	efi_init();
 
 	if (!efi_enabled(EFI_BOOT)) {
@@ -340,7 +342,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 			   FW_BUG "Booted with MMU enabled!");
 	}
 
-	// 内存块初始化，remove一些no-map区域，reserve一些如kernel，fdt，ramdisk，device等内存空间，
+	// 内存块初始化，remove一些no-map区域，reserve一些如kernel，fdt，ramdisk，device等内存空间
 	arm64_memblock_init();
 
 	paging_init();
