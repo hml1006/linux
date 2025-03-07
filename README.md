@@ -24,10 +24,11 @@
 
 [memory order](notes/armv8a-arch/12.Memory_Order.md)
 
-
 # arm64 Linux启动过程
 
 [初始启动代码head.S](./notes/head.S.md)
+
+[R_AARCH64_RELATIVE类型的.rela.dyn 重定位项](./notes/rela.dyn.md)
 
 [start_kernel流程](./notes/start_kernel.md)
 
