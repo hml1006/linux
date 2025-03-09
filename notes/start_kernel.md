@@ -48,6 +48,13 @@ sa--> xen_early_init[xen_early_init<裸机虚拟化>]
 sa--> efi_init[efi_init<efi初始化,主要是根据efi的表构造memory map,efi数据在fdt>]
 sa--> arm64_memblock_init[arm64_memblock_init<内存块初始化>]
 sa--> paging_init[paging_init]
+sa--> acpi_table_upgrade[acpi_table_upgrade<br/>acpi部分arm64 服务器支持]
+sa--> acpi_boot_table_init[acpi_boot_table_init<br/>一般启用FDT后会disable acpi]
+sa--> unflatten_device_tree[unflatten_device_tree<br/>解析设备树,把fdt转换为device_node]
+sa--> bootmem_init[bootmem_init<br/>bootmem初始化,内存管理器初始化,把fdt中的memory node转换为memblock,并reserve]
+sa--> kasan_init[kasan_init<br/>KASAN初始化,内存检测工具,编译器支持]
+sa--> request_standard_resources[request_standard_resources<br/>请求标准资源,比如PCI,USB等]
+sa--> early_ioremap_reset[early_ioremap_reset<br/>重置early ioremap的slot]
 ```
 
 ### early_fixmap_init 流程
@@ -140,6 +147,7 @@ arm64_memblock_init--> memblock_add[memblock_add<如果有limit,把kernel region
 arm64_memblock_init--> memblock_reserve1[memblock_reserve<把kernel加到reserv>]
 arm64_memblock_init--> early_init_fdt_scan_reserved_mem["early_init_fdt_scan_reserved_mem<br/>扫描fdt(device tree)中reserved memory,添加到memblock"]
 ```
+
 ### paging_init流程
 
 ```mermaid
