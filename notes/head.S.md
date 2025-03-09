@@ -37,12 +37,31 @@ cs--> 禁止从EL0访问PMU,AMU
 cs--> 配置MAIR寄存器内存属性
 cs--> 计算设置地址宽度
 cs--> 准备SCTLR寄存器内容放x0
-primary_entry--> ps[__primary_switch] 
+primary_entry--> ps[__primary_switch]
+
+```
+
+# head.S启动子流程
+
+## __primary_switch 流程
+
+```mermaid
+flowchart LR
+ps[__primary_switch] 
 ps--> em[__enable_mmu 使能mmu>ttbr0_el1设置为init_idmap_pg_dir]
 ps--> emk[__pi_early_map_kernel<br/>传入FDT地址,从FDT读取seed并生成一个offset]
+ps--> psd[__primary_switched]
+```
+
+### early map kernel
+
+```mermaid
+flowchart LR
+emk[__pi_early_map_kernel<br/>传入FDT地址,从FDT读取seed并生成一个offset]
 emk--> mf[map_fdt<br/>把FDT映射到idmap]
 emk--> clr_bss[clear_bss<br/>清bss段]
-emk--> ki[kaslr_early_init<br/>从FDT读取seed并根据seed计算一个kernel image seed]
+emk--> ki[kaslr_early_init<br/>从FDT读取seed并<br/>计算一个kaslr seed]
+emk--> va_base[根据kaslr seed计算va_base地址]
 emk--> mp[map_kernel<br/>创建kernel映射,VA和PA不相等]
 mp--> mst[map_segment<br/>.text section]
 mp--> msr[map_segment<br/>.rodata section]
@@ -53,7 +72,13 @@ mp--> idmap_cpu_replace_ttbr1[idmap_cpu_replace_ttbr1<br/>把init_pg_dir设置�
 mp--> mk[relocate_kernel<br/>重定位内核kaslr feature<br/>R_AARCH64_RELATIVE重定位类型]
 mp--> remap[把text section取消write权限重新map]
 mp--> cp[把init_pg_dir拷贝到swapper_pg_dir并更新ttbr1_el1]
-ps--> psd[__primary_switched]
+```
+
+### _primary_switched流程
+
+```mermaid
+flowchart LR
+psd[__primary_switched]
 psd--> ict[init_cpu_task<br/>初始化一个task struct,用来做栈回溯]
 psd--> ifdt[设置中断向量表,取__fdt_pointer和内核镜像地址]
 psd--> scbm[set_cpu_boot_mode_flag<br/>把CPU boot mode保存到全局变量]
