@@ -66,7 +66,7 @@ sudo qemu-system-aarch64 -cpu cortex-a710 -machine virt \
   -kernel arch/arm64/boot/Image \
   --fsdev local,id=kmod_dev,path=$PWD/k_shared,security_model=none \
   -device virtio-9p-device,fsdev=kmod_dev,mount_tag=kmod_mount \
-  --append "root=/dev/vda rootfstype=ext4 rw loglevel=8 console=ttyAMA0"  \
+  --append "root=/dev/vda rootfstype=ext4 rw loglevel=8 console=ttyAMA0 nokaslr"  \
   -serial stdio \
   -drive file=ubuntu-rootfs.img,index=0,media=disk,format=raw -S -s
 
