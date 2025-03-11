@@ -4,13 +4,29 @@
 # https://qubot.org/2023/08/09/h618-%E7%A7%BB%E6%A4%8Dubuntu-22-04-rootfs/
 
 sudo apt-get install qemu-user-static
-if [ ! -e ubuntu-base-23.10-base-arm64.tar.gz ];then
-    wget http://cdimage.ubuntu.com/ubuntu-base/releases/mantic/release/ubuntu-base-23.10-base-arm64.tar.gz
+if [ ! -e ubuntu-base-24.10-base-arm64.tar.gz ];then
+    wget http://cdimage.ubuntu.com/ubuntu-base/releases/24.10/release/ubuntu-base-24.10-base-arm64.tar.gz
 fi
 if [ ! -e rootfs ];then
     mkdir rootfs
     tar -xzvf ubuntu-base-23.10-base-arm64.tar.gz -C rootfs
 fi
+
+if [ ! -e ca-certificates_20240203_all.deb ];then
+	wget http://ports.ubuntu.com/pool/main/c/ca-certificates/ca-certificates_20240203_all.deb
+fi
+
+if [ ! -e openssl_3.3.1-2ubuntu2_arm64.deb ];then
+	wget http://ports.ubuntu.com/pool/main/o/openssl/openssl_3.3.1-2ubuntu2_arm64.deb
+fi
+
+if [ ! -e libssl3t64_3.3.1-2ubuntu2_arm64.deb ];then
+	wget http://ports.ubuntu.com/pool/main/o/openssl/libssl3t64_3.3.1-2ubuntu2_arm64.deb
+fi 
+
+sudo cp ca-certificates_20240203_all.deb ./rootfs/root/
+sudo cp openssl_3.3.1-2ubuntu2_arm64.deb ./rootfs/root/
+sudo cp libssl3t64_3.3.1-2ubuntu2_arm64.deb ./rootfs/root/
 
 sudo rm -f ./rootfs/etc/resolv.conf
 resolv=$(cat <<"EOF"
@@ -35,6 +51,26 @@ EOF
 mkdir -p ./rootfs/etc/network/
 sudo echo "${interfaces}" > ./rootfs/etc/network/interfaces
 
+source_list=$(cat <<"EOF"
+# 默认注释了源码镜像以提高 apt update 速度，如有需要可自行取消注释
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-updates main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-updates main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-backports main restricted universe multiverse
+# deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-backports main restricted universe multiverse
+
+# 以下安全更新软件源包含了官方源与镜像站配置，如有需要可自行修改注释切换
+deb http://ports.ubuntu.com/ubuntu-ports/ oracular-security main restricted universe multiverse
+# deb-src http://ports.ubuntu.com/ubuntu-ports/ oracular-security main restricted universe multiverse
+
+# 预发布软件源，不建议启用
+# deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-proposed main restricted universe multiverse
+# # deb-src https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/ oracular-proposed main restricted universe multiverse
+EOF
+)
+sudo echo "${source_list}" > ./rootfs/etc/apt/sources.list
+
 install=$(cat <<"EOF"
 #!/bin/sh
 cd /root/
@@ -44,9 +80,10 @@ passwd root
 echo louis.arm > /etc/hostname
 echo 127.0.0.1	localhost > /etc/hosts
 chmod 777 /tmp/
+dpkg -i *.deb
 apt update
 apt upgrade -y
-apt install -y dialog perl systemd sudo vim nano kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh iputils-ping resolvconf wget apt-utils
+apt install -y dialog perl-base systemd sudo vim kmod net-tools ethtool ifupdown rsyslog htop iputils-ping language-pack-en-base ssh iputils-ping resolvconf wget
 ln -s /lib/systemd/system/getty\@.service /etc/systemd/system/getty.target.wants/getty\@ttyAMA0.service
 EOF
 )
